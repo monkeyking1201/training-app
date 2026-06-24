@@ -13,26 +13,28 @@ from datetime import datetime, date
 # ── 常數設定 ────────────────────────────────────────────────────
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-# ⚠️ 兩個不同的 Google Sheets 檔案 ID（網址列 /d/ 後面那段）
-SCHEDULE_DB_ID = "1ewrFUQc1P3YfB3-h9kzuoOLvXcRiee4eLv_R6SBj5oI"   # Schedule_DB（讀 PIN 碼）
-BONUS_DB_ID    = "1KKKgeOCEBmcBxsy0d7KP6ZJqWXyhAtWqNn2FB_okPG8"       # Bonus_DB（寫申報資料）
-
-BONUS_ITEMS = [
-    ("出席率",      200),
-    ("死活題",      300),
-    ("次一手",      400),
-    ("輸棋討論",    400),
-    ("AI人機大戰",  400),
-    ("新銳循環賽", 1000),
-]
+SCHEDULE_DB_ID = "1ewrFUQc1P3YfB3-h9kzuoOLvXcRiee4eLv_R6SBj5oI"
+BONUS_DB_ID    = "1KKKgeOCEBmcBxsy0d7KP6ZJqWXyhAtWqNn2FB_okPG8"
 
 WEEKDAY_MAP = ["一", "二", "三", "四", "五", "六", "日"]
+
+# 顯示標籤 → Google Sheets 欄位對應
+# key = 寫入 DB 的欄位名稱, value = 畫面顯示文字（含 emoji）
+DISPLAY_MAP = {
+    "出席率":    "📍 今日出席",
+    "死活題":    "🧩 專項死活題",
+    "次一手":    "🎯 關鍵次一手",
+    "輸棋討論":  "🗣️ 輸棋討論",
+    "AI人機大戰":"🤖 AI人機大戰",
+    "新銳循環賽":"⚔️ 新銳循環賽",
+    "替代任務":  "🔥 教練特批之替代任務 (與原任務等值)",
+}
 
 HEADER_ROW = [
     "時間戳", "姓名", "日期", "星期",
     "出席率(200)", "死活題(300)", "次一手(400)",
     "輸棋討論(400)", "AI人機大戰(400)", "新銳循環賽(1000)",
-    "審核狀態"
+    "替代任務", "審核狀態"
 ]
 
 # ── Google Sheets 連線 ──────────────────────────────────────────
@@ -45,7 +47,6 @@ def get_gc():
 
 @st.cache_data(ttl=300)
 def load_pin_table() -> dict:
-    """從 Schedule_DB 的 PIN 工作表，回傳 {PIN字串: 姓名}"""
     gc = get_gc()
     sh = gc.open_by_key(SCHEDULE_DB_ID)
     ws = sh.worksheet("PIN")
@@ -54,16 +55,14 @@ def load_pin_table() -> dict:
             for row in rows if len(row) >= 2 and row[1].strip()}
 
 def get_or_create_bonus_ws():
-    """開啟 Bonus_DB，若工作表1不存在則自動建立並寫入 header"""
     gc = get_gc()
     sh = gc.open_by_key(BONUS_DB_ID)
     try:
-        ws = sh.get_worksheet(0)   # 取第一個工作表
-        # 若是全新空白表，補上 header
+        ws = sh.get_worksheet(0)
         if ws.row_count == 0 or ws.cell(1, 1).value != "時間戳":
             ws.insert_row(HEADER_ROW, index=1)
     except Exception:
-        ws = sh.add_worksheet("申報記錄", rows=2000, cols=12)
+        ws = sh.add_worksheet("申報記錄", rows=2000, cols=13)
         ws.append_row(HEADER_ROW)
     return ws
 
@@ -71,7 +70,7 @@ def already_submitted_today(name: str) -> bool:
     ws = get_or_create_bonus_ws()
     today_str = date.today().strftime("%Y-%m-%d")
     all_rows = ws.get_all_values()
-    for row in all_rows[1:]:   # 跳過 header
+    for row in all_rows[1:]:
         if len(row) >= 3 and row[1] == name and row[2] == today_str:
             return True
     return False
@@ -91,13 +90,14 @@ def submit_bonus(name: str, checks: dict):
         "V" if checks.get("輸棋討論")   else "",
         "V" if checks.get("AI人機大戰") else "",
         "V" if checks.get("新銳循環賽") else "",
+        "V" if checks.get("替代任務")   else "",
         "待審核",
     ]
     ws.append_row(row)
 
 # ── 頁面設定 ────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="獎金申報 | 新銳隊",
+    page_title="訓練申報 | 新銳隊",
     page_icon="🏆",
     layout="centered",
 )
@@ -118,27 +118,16 @@ st.markdown("""
         color: #888;
         margin-bottom: 12px;
     }
-    .price-tag {
-        color: #2e7d32;
+    .section-title {
+        font-size: 1rem;
         font-weight: 700;
-        font-size: 1.1rem;
-    }
-    .total-box {
-        background: #f0f4ff;
-        border-radius: 12px;
-        padding: 16px 24px;
-        text-align: center;
-        margin: 16px 0;
-    }
-    .total-amount {
-        font-size: 2rem;
-        font-weight: 900;
-        color: #d32f2f;
+        color: #444;
+        margin: 8px 0 4px 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session state 初始化 ────────────────────────────────────────
+# ── Session state ────────────────────────────────────────────────
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.player_name = ""
@@ -149,8 +138,8 @@ if "submitted" not in st.session_state:
 # 畫面 A：登入
 # ══════════════════════════════════════════════════════════════════
 if not st.session_state.authenticated:
-    st.markdown("## 🏆 訓練獎金申報")
-    st.markdown("每日訓練結束後，輸入你的專屬 PIN 碼來申報今日獎金。")
+    st.markdown("## 🏆 訓練申報")
+    st.markdown("每日訓練結束後，輸入你的專屬 PIN 碼來申報今日完成項目。")
     st.divider()
 
     pin_input = st.text_input(
@@ -199,29 +188,26 @@ else:
             st.rerun()
         st.stop()
 
-    # 勾選項目
-    st.markdown("### 今日完成的項目")
-    st.caption("勾選你今天完成的訓練，完成後按送出。")
-
     checks = {}
-    total = 0
-    for item, price in BONUS_ITEMS:
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            checked = st.checkbox(f"**{item}**", key=item)
-        with col2:
-            st.markdown(f'<span class="price-tag">${price}</span>', unsafe_allow_html=True)
-        checks[item] = checked
-        if checked:
-            total += price
 
-    # 即時金額顯示
-    st.markdown(f"""
-    <div class="total-box">
-        本次申報金額<br>
-        <span class="total-amount">${total:,}</span> 元
-    </div>
-    """, unsafe_allow_html=True)
+    # ── 第一區塊：基礎自律模組 ──────────────────────────────────
+    st.markdown("#### 【基礎自律模組】")
+    checks["出席率"]   = st.checkbox(DISPLAY_MAP["出席率"],   key="出席率")
+    checks["死活題"]   = st.checkbox(DISPLAY_MAP["死活題"],   key="死活題")
+
+    st.divider()
+
+    # ── 第二區塊：高壓實戰模組 ──────────────────────────────────
+    st.markdown("#### 【高壓實戰模組】")
+    checks["次一手"]    = st.checkbox(DISPLAY_MAP["次一手"],    key="次一手")
+    checks["輸棋討論"]  = st.checkbox(DISPLAY_MAP["輸棋討論"],  key="輸棋討論")
+    checks["AI人機大戰"]= st.checkbox(DISPLAY_MAP["AI人機大戰"],key="AI人機大戰")
+    checks["新銳循環賽"]= st.checkbox(DISPLAY_MAP["新銳循環賽"],key="新銳循環賽")
+
+    st.divider()
+
+    # ── 替代任務 ────────────────────────────────────────────────
+    checks["替代任務"] = st.checkbox(DISPLAY_MAP["替代任務"], key="替代任務")
 
     st.divider()
 
