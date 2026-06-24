@@ -34,9 +34,10 @@ ITEM_COL_IDX = {
     "出席率": 4, "死活題": 5, "次一手": 6,
     "輸棋討論": 7, "AI人機大戰": 8, "新銳循環賽": 9,
 }
-STATUS_COL  = 11   # L 欄，審核狀態
-WEEKDAY_ZH  = ["一", "二", "三", "四", "五", "六", "日"]
-MAX_WEEKLY  = 7 * sum(ITEM_PRICES.values())  # 7 × 2700 = 18900
+STATUS_COL    = 11   # L 欄，審核狀態
+WEEKDAY_ZH    = ["一", "二", "三", "四", "五", "六", "日"]
+WEEKLY_TARGET = 4500    # 100,000 ÷ 22週 ≈ 每週理想進度
+PROJECT_TOTAL = 100_000 # 半年總預算
 
 # ── Google Sheets 連線 ──────────────────────────────────────────
 @st.cache_resource
@@ -123,19 +124,23 @@ def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.Dat
 
     return pd.DataFrame(rows).set_index("日期")
 
-def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int, int]:
-    """回傳 (本週已核准獎金, 變現率%)"""
+def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int, int, int]:
+    """回傳 (本週已核准獎金, 本週預算達成率%, 專案累計總獎金)"""
     week_strs = {d.strftime("%Y-%m-%d") for d in week_dates}
-    earned = sum(
-        ITEM_PRICES[item]
-        for row in all_data[1:]
-        if (len(row) > STATUS_COL and row[1] == player
-                and row[2] in week_strs and row[STATUS_COL] == "已核准")
-        for item, col in ITEM_COL_IDX.items()
-        if col < len(row) and row[col] == "V"
-    )
-    rate = round(earned / MAX_WEEKLY * 100)
-    return earned, rate
+    weekly_earned = 0
+    total_earned  = 0
+    for row in all_data[1:]:
+        if len(row) > STATUS_COL and row[1] == player and row[STATUS_COL] == "已核准":
+            row_bonus = sum(
+                ITEM_PRICES[item]
+                for item, col in ITEM_COL_IDX.items()
+                if col < len(row) and row[col] == "V"
+            )
+            total_earned += row_bonus
+            if row[2] in week_strs:
+                weekly_earned += row_bonus
+    achievement = round(weekly_earned / WEEKLY_TARGET * 100)
+    return weekly_earned, achievement, total_earned
 
 # ── 頁面設定 ────────────────────────────────────────────────────
 st.set_page_config(
@@ -182,7 +187,10 @@ st.markdown("""
         font-weight: 900;
         color: #d32f2f;
     }
-    .rate-num {
+    .rate-perfect  { font-size:1.6rem; font-weight:900; color:#2e7d32; }
+    .rate-behind   { font-size:1.6rem; font-weight:900; color:#d32f2f; }
+    .rate-overburn { font-size:1.6rem; font-weight:900; color:#f57f17; }
+    .remain-num {
         font-size: 1.6rem;
         font-weight: 800;
         color: #1565c0;
@@ -272,22 +280,39 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 獎金加總
-earned, rate = calc_bonus(selected, week_dates, all_data)
+# KPI 加總
+weekly_earned, achievement, total_earned = calc_bonus(selected, week_dates, all_data)
+remaining = PROJECT_TOTAL - total_earned
 
-col1, col2 = st.columns(2)
+# 達成率動態顏色與文字
+if 90 <= achievement <= 110:
+    rate_class, rate_note = "rate-perfect",  "進度完美 ✅"
+elif achievement < 90:
+    rate_class, rate_note = "rate-behind",   "進度落後 ⚠️"
+else:
+    rate_class, rate_note = "rate-overburn", "超前燃燒 🔥"
+
+col1, col2, col3 = st.columns(3)
 with col1:
     st.markdown(f"""
     <div class="bonus-box">
         本週已累計獎金<br>
-        <span class="bonus-num">${earned:,}</span> 元
+        <span class="bonus-num">${weekly_earned:,}</span> 元
     </div>
     """, unsafe_allow_html=True)
 with col2:
     st.markdown(f"""
     <div class="bonus-box">
-        本週獎金變現率<br>
-        <span class="rate-num">{rate}%</span>
+        【本週預算達成率】<br>
+        <span class="{rate_class}">{achievement}%</span><br>
+        <small>{rate_note}</small>
+    </div>
+    """, unsafe_allow_html=True)
+with col3:
+    st.markdown(f"""
+    <div class="bonus-box">
+        【10萬專案剩餘額度】<br>
+        <span class="remain-num">${remaining:,}</span> 元
     </div>
     """, unsafe_allow_html=True)
 
