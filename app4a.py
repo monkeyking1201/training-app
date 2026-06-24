@@ -48,6 +48,13 @@ def get_gc():
     )
     return gspread.authorize(creds)
 
+@st.cache_resource
+def get_bonus_ws():
+    """Bonus_DB 工作表，session 級別快取，只連線一次"""
+    gc = get_gc()
+    sh = gc.open_by_key(BONUS_DB_ID)
+    return sh.get_worksheet(0)
+
 @st.cache_data(ttl=300)
 def load_pin_table() -> dict:
     gc = get_gc()
@@ -57,20 +64,9 @@ def load_pin_table() -> dict:
     return {str(row[1]).strip(): row[0].strip()
             for row in rows if len(row) >= 2 and row[1].strip()}
 
-def get_or_create_bonus_ws():
-    gc = get_gc()
-    sh = gc.open_by_key(BONUS_DB_ID)
-    try:
-        ws = sh.get_worksheet(0)
-        if ws.row_count == 0 or ws.cell(1, 1).value != "時間戳":
-            ws.insert_row(HEADER_ROW, index=1)
-    except Exception:
-        ws = sh.add_worksheet("申報記錄", rows=2000, cols=13)
-        ws.append_row(HEADER_ROW)
-    return ws
-
 def already_submitted_today(name: str) -> bool:
-    ws = get_or_create_bonus_ws()
+    """只在登入後呼叫一次，結果存入 session_state"""
+    ws = get_bonus_ws()
     today_str = date.today().strftime("%Y-%m-%d")
     all_rows = ws.get_all_values()
     for row in all_rows[1:]:
@@ -79,7 +75,7 @@ def already_submitted_today(name: str) -> bool:
     return False
 
 def submit_bonus(name: str, checks: dict):
-    ws = get_or_create_bonus_ws()
+    ws = get_bonus_ws()
     now = datetime.now()
     weekday = WEEKDAY_MAP[now.weekday()]
     row = [
@@ -136,6 +132,10 @@ if "authenticated" not in st.session_state:
     st.session_state.player_name = ""
 if "submitted" not in st.session_state:
     st.session_state.submitted = False
+if "already_done" not in st.session_state:
+    st.session_state.already_done = False
+if "done_checked" not in st.session_state:
+    st.session_state.done_checked = False
 
 # ══════════════════════════════════════════════════════════════════
 # 畫面 A：登入
@@ -180,14 +180,20 @@ else:
     )
     st.divider()
 
-    # 已送出判斷
-    if already_submitted_today(name) or st.session_state.submitted:
+    # 已送出判斷（只在登入後執行一次，避免重複打 API）
+    if not st.session_state.done_checked:
+        st.session_state.already_done = already_submitted_today(name)
+        st.session_state.done_checked = True
+
+    if st.session_state.already_done or st.session_state.submitted:
         st.success("✅ 今日申報完成，等待教練審核！")
         st.info("明天訓練結束後再回來申報。")
         if st.button("登出", use_container_width=True):
             st.session_state.authenticated = False
             st.session_state.player_name = ""
             st.session_state.submitted = False
+            st.session_state.already_done = False
+            st.session_state.done_checked = False
             st.rerun()
         st.stop()
 
