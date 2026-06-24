@@ -14,8 +14,8 @@ from datetime import datetime, date
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # ⚠️ 兩個不同的 Google Sheets 檔案 ID（網址列 /d/ 後面那段）
-SCHEDULE_DB_ID = "YOUR_SCHEDULE_DB_SHEET_ID"   # Schedule_DB（讀 PIN 碼）
-BONUS_DB_ID    = "YOUR_BONUS_DB_SHEET_ID"       # Bonus_DB（寫申報資料）
+SCHEDULE_DB_ID = "lewrFWQc1P3YfB3-h9kzuo0LvXcRiee4eLv_R6SBj5oI"
+BONUS_DB_ID    = "1KKKgeOCEBmcBxsyOd7KP6ZJqWXyhAtWqWn2FB_okPG8"
 
 BONUS_ITEMS = [
     ("出席率",      200),
