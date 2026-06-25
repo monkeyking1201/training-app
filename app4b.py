@@ -35,7 +35,21 @@ ITEM_COL_IDX = {
     "輸棋討論": 7, "AI人機大戰": 8, "新銳循環賽": 9,
 }
 ALT_COL       = 10   # K 欄，替代任務（記錄等值原任務名稱）
-STATUS_COL    = 11   # L 欄，審核狀態
+STATUS_COL    = 11   # L 欄，審核狀態（最早預期的位置）
+
+def row_status(row: list) -> str:
+    """從 STATUS_COL 之後搜尋 '待審核'/'已核准'，容忍多餘欄位"""
+    for v in row[STATUS_COL:]:
+        if v.strip() in ("待審核", "已核准"):
+            return v.strip()
+    return ""
+
+def row_status_idx_1based(row: list) -> int:
+    """回傳審核狀態的 1-based 欄位號（給 gspread.Cell 用）"""
+    for i, v in enumerate(row):
+        if i >= STATUS_COL and v.strip() in ("待審核", "已核准"):
+            return i + 1
+    return STATUS_COL + 1
 WEEKDAY_ZH    = ["一", "二", "三", "四", "五", "六", "日"]
 WEEKLY_TARGET = 4500    # 100,000 ÷ 22週 ≈ 每週理想進度
 PROJECT_TOTAL = 100_000 # 半年總預算
@@ -78,16 +92,16 @@ def get_pending_today(all_data: list) -> list[tuple]:
     return [
         (i + 2, row[1])
         for i, row in enumerate(all_data[1:])
-        if len(row) > STATUS_COL and row[2] == today_str and row[STATUS_COL] == "待審核"
+        if len(row) > STATUS_COL and row[2] == today_str and row_status(row) == "待審核"
     ]
 
 def approve_all_pending(all_data: list) -> int:
     """把今日所有 '待審核' 改為 '已核准'，回傳核准筆數"""
     today_str = date.today().strftime("%Y-%m-%d")
     cells = [
-        gspread.Cell(i + 2, STATUS_COL + 1, "已核准")   # gspread 1-based
+        gspread.Cell(i + 2, row_status_idx_1based(row), "已核准")
         for i, row in enumerate(all_data[1:])
-        if len(row) > STATUS_COL and row[2] == today_str and row[STATUS_COL] == "待審核"
+        if len(row) > STATUS_COL and row[2] == today_str and row_status(row) == "待審核"
     ]
     if cells:
         get_bonus_ws().update_cells(cells)
@@ -101,7 +115,7 @@ def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.Dat
 
     for row in all_data[1:]:
         if len(row) > STATUS_COL and row[1] == player and row[2] in week_strs:
-            ds, status = row[2], row[STATUS_COL]
+            ds, status = row[2], row_status(row)
             if ds not in lookup:
                 lookup[ds] = {}
             for item, col in ITEM_COL_IDX.items():
@@ -136,7 +150,7 @@ def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int
     weekly_earned = 0
     total_earned  = 0
     for row in all_data[1:]:
-        if len(row) > STATUS_COL and row[1] == player and row[STATUS_COL] == "已核准":
+        if len(row) > STATUS_COL and row[1] == player and row_status(row) == "已核准":
             # 六個主項目
             row_bonus = sum(
                 ITEM_PRICES[item]
