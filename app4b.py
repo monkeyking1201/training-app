@@ -1,7 +1,5 @@
 """
-App 4B — 教練審核 + 院長熱圖戰情端  (UI v2 — McKinsey Dark)
-上半：今日待審核清單 + 一鍵核准
-下半：Metrics → 熱圖矩陣 → 達成率進度條
+App 4B — 教練審核 + 院長熱圖戰情端  (UI v3 — McKinsey Dark Command Center)
 """
 
 import streamlit as st
@@ -70,8 +68,8 @@ def load_bonus_data() -> list:
 
 @st.cache_data(ttl=600)
 def load_player_list() -> list:
-    sh  = get_gc().open_by_key(SCHEDULE_DB_ID)
-    ws  = sh.worksheet("PIN")
+    sh   = get_gc().open_by_key(SCHEDULE_DB_ID)
+    ws   = sh.worksheet("PIN")
     rows = ws.get_all_values()
     return [r[0].strip() for r in rows if len(r) >= 1 and r[0].strip()]
 
@@ -103,9 +101,9 @@ def approve_all_pending(all_data: list) -> int:
     return len(cells)
 
 def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.DataFrame:
-    week_strs   = {d.strftime("%Y-%m-%d") for d in week_dates}
-    lookup      : dict[str, dict]  = {}
-    lookup_alt  : dict[str, tuple] = {}
+    week_strs  = {d.strftime("%Y-%m-%d") for d in week_dates}
+    lookup     : dict[str, dict]  = {}
+    lookup_alt : dict[str, tuple] = {}
 
     for row in all_data[1:]:
         if len(row) > STATUS_COL and row[1] == player and row[2] in week_strs:
@@ -157,62 +155,80 @@ def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int
     return weekly_earned, achievement, total_earned
 
 
-# ── Pandas Styler：色塊化熱圖 ─────────────────────────────────────
+# ── Pandas Styler：暗色主題色塊化熱圖 ────────────────────────────
 def _cell_style(val: str) -> str:
     v = str(val)
     if v.startswith("✅"):
+        # 柔和微光綠，不刺眼
         return (
-            "background-color: #dcfce7;"
-            "color: #166534;"
+            "background-color: rgba(34,197,94,0.15);"
+            "color: #4ade80;"
             "font-weight: 700;"
             "text-align: center;"
         )
     if v.startswith("🟡"):
+        # 柔和琥珀
         return (
-            "background-color: #fef9c3;"
-            "color: #854d0e;"
+            "background-color: rgba(234,179,8,0.15);"
+            "color: #fbbf24;"
             "font-weight: 700;"
             "text-align: center;"
         )
     # 未申報
     return (
-        "background-color: #f1f5f9;"
-        "color: #94a3b8;"
+        "background-color: rgba(148,163,184,0.06);"
+        "color: #475569;"
         "text-align: center;"
     )
 
 def style_heatmap(df: pd.DataFrame):
     try:
-        styler = df.style.map(_cell_style)          # pandas ≥ 2.1
+        styler = df.style.map(_cell_style)        # pandas ≥ 2.1
     except AttributeError:
-        styler = df.style.applymap(_cell_style)     # pandas < 2.1 fallback
+        styler = df.style.applymap(_cell_style)   # pandas < 2.1
 
     styler.set_properties(**{
-        "padding":     "10px 18px",
-        "font-size":   "1.05rem",
+        "padding":     "11px 18px",
+        "font-size":   "1.02rem",
         "line-height": "1.9",
         "border":      "none",
+        "font-family": "'Inter','SF Pro Display','Helvetica Neue',sans-serif",
     })
     styler.set_table_styles([
         {"selector": "thead th", "props": [
-            ("background-color", "#1e293b"),
-            ("color",            "#94a3b8"),
-            ("font-size",        "0.75rem"),
+            ("background-color", "rgba(15,23,42,0.95)"),
+            ("color",            "#64748b"),
+            ("font-size",        "0.7rem"),
             ("font-weight",      "700"),
-            ("letter-spacing",   "0.07em"),
+            ("letter-spacing",   "0.09em"),
             ("text-transform",   "uppercase"),
             ("padding",          "10px 18px"),
             ("border",           "none"),
+            ("border-bottom",    "1px solid rgba(255,255,255,0.08)"),
         ]},
-        {"selector": "td, th", "props": [
-            ("border-bottom", "1px solid #e2e8f0"),
+        {"selector": "td", "props": [
+            ("border-top",    "none"),
+            ("border-left",   "none"),
+            ("border-right",  "none"),
+            ("border-bottom", "1px solid rgba(255,255,255,0.06)"),
         ]},
         {"selector": "table", "props": [
             ("border-collapse", "collapse"),
             ("width",           "100%"),
+            ("background-color","transparent"),
         ]},
-        {"selector": "tbody tr:nth-child(even) td", "props": [
-            ("filter", "brightness(0.97)"),
+        {"selector": "tbody tr:hover td", "props": [
+            ("filter", "brightness(1.25)"),
+        ]},
+        # 日期 index 欄
+        {"selector": "th.row_heading", "props": [
+            ("background-color", "rgba(15,23,42,0.95)"),
+            ("color",            "#94a3b8"),
+            ("font-weight",      "600"),
+            ("font-size",        "0.85rem"),
+            ("border",           "none"),
+            ("border-bottom",    "1px solid rgba(255,255,255,0.06)"),
+            ("padding",          "11px 18px"),
         ]},
     ])
     return styler
@@ -229,196 +245,261 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+/* ═══════════════════════════════════════════════
+   0. 字體 & 全域 Reset
+═══════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
-/* ── Global ── */
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
 
 html, body, .stApp {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    background-color: #0a0f1e !important;
+    font-family: 'Inter','SF Pro Display','Helvetica Neue',sans-serif !important;
+    background-color: #080d1a !important;
+    color: #e2e8f0 !important;
 }
 
+/* ═══════════════════════════════════════════════
+   1. 移除頂部間距、限制最大寬度
+═══════════════════════════════════════════════ */
 .block-container {
-    padding-top: 1.8rem  !important;
-    padding-bottom: 3rem !important;
-    max-width: 1440px    !important;
+    padding-top:    1.6rem  !important;
+    padding-bottom: 3rem    !important;
+    max-width:      1480px  !important;
 }
 
-/* Hide Streamlit chrome */
-#MainMenu, footer, header { visibility: hidden; }
-
-/* ── Card shell (wraps st.container border=True) ── */
+/* ═══════════════════════════════════════════════
+   2. 卡片容器（st.container border=True）
+      → 暗色玻璃面板
+═══════════════════════════════════════════════ */
 [data-testid="stVerticalBlockBorderWrapper"] > div {
-    background:    #ffffff !important;
-    border-radius: 16px    !important;
-    border:        1px solid #e2e8f0 !important;
-    box-shadow:    0 1px 4px rgba(0,0,0,0.06),
-                   0 6px 20px rgba(0,0,0,0.05) !important;
-    padding:       8px 4px !important;
+    background:    rgba(255,255,255,0.03)  !important;
+    border:        1px solid rgba(255,255,255,0.09) !important;
+    border-radius: 16px  !important;
+    box-shadow:    0 0 0 1px rgba(255,255,255,0.04),
+                   0 8px 32px rgba(0,0,0,0.35)  !important;
+    padding:       8px 6px !important;
 }
 
-/* Dark card variant — audit section */
-.audit-card [data-testid="stVerticalBlockBorderWrapper"] > div {
-    background: #1e293b !important;
-    border:     1px solid #334155 !important;
+/* ═══════════════════════════════════════════════
+   3. Dataframe 容器 → 融入暗色
+═══════════════════════════════════════════════ */
+[data-testid="stDataFrame"] {
+    border-radius: 12px !important;
+    overflow:      hidden !important;
+    border:        1px solid rgba(255,255,255,0.08) !important;
+    background:    rgba(15,23,42,0.7) !important;
 }
 
-/* ── Metric card (pure HTML) ── */
-.kpi-row { display: flex; gap: 16px; margin-bottom: 24px; }
+/* Streamlit 自動生成的 iframe 裡 table */
+[data-testid="stDataFrame"] iframe {
+    background: transparent !important;
+}
+
+/* ═══════════════════════════════════════════════
+   4. 選手大名字 → 白色 / 科技銀
+═══════════════════════════════════════════════ */
+.big-name {
+    font-family:   'Inter','SF Pro Display','Helvetica Neue',sans-serif !important;
+    font-size:     3.4rem   !important;
+    font-weight:   900      !important;
+    color:         #F1F5F9  !important;   /* 科技銀白，清晰有威信 */
+    letter-spacing: 10px    !important;
+    text-align:    center   !important;
+    padding:       16px 0 4px !important;
+    text-shadow:   0 0 40px rgba(148,163,184,0.25);
+}
+
+/* ═══════════════════════════════════════════════
+   5. KPI 卡片 → 微透光暗色面板
+═══════════════════════════════════════════════ */
+.kpi-row {
+    display:         flex;
+    gap:             16px;
+    margin-bottom:   24px;
+}
 
 .kpi-card {
-    flex: 1;
-    background:    #ffffff;
-    border:        1px solid #e2e8f0;
-    border-radius: 16px;
-    padding:       22px 28px 18px;
-    box-shadow:    0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+    flex:            1;
+    background:      rgba(255,255,255,0.03) !important;
+    border:          1px solid rgba(255,255,255,0.10) !important;
+    border-radius:   12px !important;
+    padding:         20px 24px !important;
+    box-shadow:      0 0 0 1px rgba(255,255,255,0.03),
+                     0 4px 20px rgba(0,0,0,0.3) !important;
 }
 
+/* 數值：大字、亮色 */
 .kpi-value {
-    font-family:   'Inter', sans-serif;
-    font-size:     2.15rem;
-    font-weight:   800;
-    color:         #0f172a;
+    font-family:   'Inter','SF Pro Display',sans-serif;
+    font-size:     2.1rem;
+    font-weight:   700;
+    color:         #38bdf8;          /* 科技藍 */
     line-height:   1.1;
-    letter-spacing:-0.02em;
+    letter-spacing: -0.02em;
 }
-.kpi-value-warn   { color: #fb7185 !important; }
-.kpi-value-amber  { color: #f59e0b !important; }
-.kpi-value-ok     { color: #16a34a !important; }
+.kpi-value-warn {
+    font-size:     2.1rem;
+    font-weight:   700;
+    color:         #fb7185 !important;   /* 珊瑚紅（< 70%） */
+    line-height:   1.1;
+    letter-spacing: -0.02em;
+}
+.kpi-value-amber {
+    font-size:     2.1rem;
+    font-weight:   700;
+    color:         #fbbf24 !important;   /* 琥珀橙 */
+    line-height:   1.1;
+    letter-spacing: -0.02em;
+}
+.kpi-value-ok {
+    font-size:     2.1rem;
+    font-weight:   700;
+    color:         #4ade80 !important;   /* 微光綠 */
+    line-height:   1.1;
+    letter-spacing: -0.02em;
+}
 
+/* 標籤：小字、優雅灰藍 */
 .kpi-label {
-    font-family:   'Inter', sans-serif;
-    font-size:     0.72rem;
+    font-family:   'Inter','SF Pro Display',sans-serif;
+    font-size:     0.7rem;
     font-weight:   600;
-    color:         #64748b;
-    letter-spacing: 0.07em;
+    color:         #94A3B8 !important;  /* 灰藍 */
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    margin-top:    7px;
+    margin-top:    6px;
 }
 
 .kpi-note {
-    font-size:   0.8rem;
+    font-size:   0.78rem;
     color:       #64748b;
     margin-top:  4px;
 }
 
-/* ── Progress bar ── */
+/* ═══════════════════════════════════════════════
+   6. 進度條
+═══════════════════════════════════════════════ */
 .prog-wrap {
-    background:    #e2e8f0;
+    background:    rgba(255,255,255,0.08);
     border-radius: 999px;
-    height:        7px;
+    height:        6px;
     margin-top:    10px;
     overflow:      hidden;
 }
 .prog-bar {
-    height:        7px;
+    height:        6px;
     border-radius: 999px;
 }
 
-/* ── Section label ── */
+/* ═══════════════════════════════════════════════
+   7. Section 標籤
+═══════════════════════════════════════════════ */
 .sec-label {
-    font-family:   'Inter', sans-serif;
-    font-size:     0.72rem;
-    font-weight:   700;
-    color:         #64748b;
-    letter-spacing: 0.12em;
+    font-family:    'Inter','SF Pro Display',sans-serif;
+    font-size:      0.7rem;
+    font-weight:    700;
+    color:          #64748b;
+    letter-spacing: 0.13em;
     text-transform: uppercase;
     padding-bottom: 10px;
-    border-bottom:  1px solid #e2e8f0;
+    border-bottom:  1px solid rgba(255,255,255,0.08);
     margin-bottom:  16px;
 }
 
-.sec-label-dark {
-    font-family:   'Inter', sans-serif;
-    font-size:     0.72rem;
-    font-weight:   700;
-    color:         #64748b;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    padding-bottom: 10px;
-    border-bottom:  1px solid #334155;
-    margin-bottom:  16px;
-}
-
-/* ── Big player name ── */
-.big-name {
-    font-size:     3rem;
-    font-weight:   900;
-    color:         #0f172a;
-    letter-spacing: 8px;
-    text-align:    center;
-    padding:       12px 0 2px;
-}
-
+/* ═══════════════════════════════════════════════
+   8. 週期標籤
+═══════════════════════════════════════════════ */
 .week-label {
-    text-align:  center;
-    color:       #64748b;
-    font-size:   0.88rem;
+    text-align:    center;
+    color:         #64748b;
+    font-size:     0.88rem;
     margin-bottom: 20px;
 }
 
-/* ── Pending badge ── */
+/* ═══════════════════════════════════════════════
+   9. 待審核 Badge
+═══════════════════════════════════════════════ */
 .pending-badge {
     display:       inline-block;
-    background:    #1e293b;
-    border:        1px solid #f59e0b;
+    background:    rgba(251,191,36,0.12);
+    border:        1px solid rgba(251,191,36,0.35);
     border-radius: 20px;
     padding:       5px 16px;
     margin:        4px;
-    font-size:     0.88rem;
+    font-size:     0.86rem;
     font-weight:   600;
     color:         #fbbf24;
 }
 
-/* ── Page title area ── */
+/* ═══════════════════════════════════════════════
+   10. 頁首文字
+═══════════════════════════════════════════════ */
 .page-eyebrow {
-    font-family:   'Inter', sans-serif;
-    font-size:     0.72rem;
-    font-weight:   700;
-    color:         #334155;
+    font-size:      0.7rem;
+    font-weight:    700;
+    color:          #334155;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     margin-bottom:  4px;
 }
 .page-heading {
-    font-family:   'Inter', sans-serif;
-    font-size:     1.9rem;
+    font-size:     1.85rem;
     font-weight:   900;
     color:         #f1f5f9;
     margin-bottom: 28px;
     letter-spacing: -0.01em;
 }
 
-/* ── Legend ── */
+/* ═══════════════════════════════════════════════
+   11. Legend
+═══════════════════════════════════════════════ */
 .legend {
-    font-size:  0.8rem;
-    color:      #94a3b8;
+    font-size:  0.78rem;
+    color:      #475569;
     text-align: center;
     margin-top: 8px;
 }
 
-/* ── Dataframe container ── */
-[data-testid="stDataFrame"] {
-    border-radius: 12px;
-    overflow:      hidden;
-    border:        1px solid #e2e8f0 !important;
+/* ═══════════════════════════════════════════════
+   12. Streamlit 原生元件覆寫
+═══════════════════════════════════════════════ */
+
+/* 頁面隱藏多餘元素 */
+#MainMenu, footer, header { visibility: hidden; }
+
+/* Success / info / warning 訊息盒 */
+[data-testid="stAlert"] {
+    background:    rgba(255,255,255,0.04) !important;
+    border:        1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 10px !important;
+    color:         #e2e8f0 !important;
 }
 
-/* Selectbox dark */
-.stSelectbox label { color: #94a3b8 !important; font-size: 0.8rem !important; }
-
-/* Button */
+/* 按鈕 */
 .stButton > button {
-    border-radius: 10px    !important;
-    font-family:   'Inter', sans-serif !important;
-    font-weight:   600 !important;
+    border-radius:  10px !important;
+    font-family:    'Inter',sans-serif !important;
+    font-weight:    600 !important;
     letter-spacing: 0.02em !important;
 }
 
+/* Selectbox */
+.stSelectbox > div > div {
+    background-color: rgba(255,255,255,0.04) !important;
+    border:           1px solid rgba(255,255,255,0.12) !important;
+    color:            #f1f5f9 !important;
+    border-radius:    10px !important;
+}
+.stSelectbox label {
+    color:     #64748b !important;
+    font-size: 0.78rem !important;
+}
+
 /* Divider */
-hr { border-color: #1e293b !important; margin: 20px 0 !important; }
+hr { border-color: rgba(255,255,255,0.07) !important; margin: 20px 0 !important; }
+
+/* Spinner text */
+[data-testid="stSpinner"] p { color: #94a3b8 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -446,7 +527,7 @@ with st.container(border=True):
         st.success(f"✅ {today_label}　今日無待審核申報")
     else:
         st.markdown(
-            f"<span style='font-weight:600;font-size:1rem;color:#0f172a;'>"
+            f"<span style='font-weight:600;font-size:1rem;color:#e2e8f0;'>"
             f"{today_label}　待審核：{len(pending)} 筆</span>",
             unsafe_allow_html=True,
         )
@@ -478,7 +559,7 @@ with st.container(border=True):
     # 選手下拉
     selected = st.selectbox("選擇選手", players, label_visibility="collapsed")
 
-    # 大名字
+    # 大名字（科技銀白）
     st.markdown(f'<div class="big-name">{selected}</div>', unsafe_allow_html=True)
     week_start = week_dates[0].strftime("%m/%d")
     week_end   = week_dates[6].strftime("%m/%d")
@@ -487,23 +568,23 @@ with st.container(border=True):
         unsafe_allow_html=True,
     )
 
-    # ── 計算 KPI ────────────────────────────────────────────────
+    # ── 計算 KPI ─────────────────────────────────────────────────
     weekly_earned, achievement, total_earned = calc_bonus(selected, week_dates, all_data)
     remaining = PROJECT_TOTAL - total_earned
 
     # 達成率樣式
     if achievement < 70:
-        val_cls, rate_note, bar_color = "kpi-value kpi-value-warn",  "進度落後 ⚠️",  "#fb7185"
+        val_cls, rate_note, bar_color = "kpi-value-warn",  "進度落後 ⚠️",  "#fb7185"
     elif achievement < 90:
-        val_cls, rate_note, bar_color = "kpi-value kpi-value-amber", "需加速 ⚡",     "#f59e0b"
+        val_cls, rate_note, bar_color = "kpi-value-amber", "需加速 ⚡",    "#fbbf24"
     elif achievement <= 110:
-        val_cls, rate_note, bar_color = "kpi-value kpi-value-ok",    "進度完美 ✅",   "#22c55e"
+        val_cls, rate_note, bar_color = "kpi-value-ok",    "進度完美 ✅",  "#4ade80"
     else:
-        val_cls, rate_note, bar_color = "kpi-value kpi-value-amber", "超前燃燒 🔥",  "#f59e0b"
+        val_cls, rate_note, bar_color = "kpi-value-amber", "超前燃燒 🔥", "#fbbf24"
 
     bar_width = min(achievement, 100)
 
-    # ── 三格 KPI 卡片（在熱圖上方）──────────────────────────────
+    # ── 三格 KPI 卡片（熱圖上方）────────────────────────────────
     st.markdown(f"""
     <div class="kpi-row">
       <div class="kpi-card">
