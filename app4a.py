@@ -22,7 +22,6 @@ BONUS_DB_ID    = "1KKKgeOCEBmcBxsy0d7KP6ZJqWXyhAtWqNn2FB_okPG8"
 WEEKDAY_MAP = ["一", "二", "三", "四", "五", "六", "日"]
 
 # 顯示標籤 → Google Sheets 欄位對應
-# key = 寫入 DB 的欄位名稱, value = 畫面顯示文字（含 emoji）
 DISPLAY_MAP = {
     "出席率":    "📍 今日出席",
     "死活題":    "🧩 專項死活題",
@@ -30,7 +29,17 @@ DISPLAY_MAP = {
     "輸棋討論":  "🗣️ 輸棋討論",
     "AI人機大戰":"🤖 AI人機大戰",
     "新銳循環賽":"⚔️ 新銳循環賽",
-    "替代任務":  "🔥 教練特批之替代任務 (與原任務等值)",
+}
+
+# 替代任務下拉選項：顯示文字 → 寫入 DB 的欄位名稱
+ALT_TASK_OPTIONS = {
+    "（本日無替代任務）": "",
+    "📍 出席率  $200":    "出席率",
+    "🧩 死活題  $300":    "死活題",
+    "🎯 次一手  $400":    "次一手",
+    "🗣️ 輸棋討論 $400":  "輸棋討論",
+    "🤖 AI人機大戰 $400": "AI人機大戰",
+    "⚔️ 新銳循環賽 $1000":"新銳循環賽",
 }
 
 HEADER_ROW = [
@@ -74,7 +83,11 @@ def already_submitted_today(name: str) -> bool:
             return True
     return False
 
-def submit_bonus(name: str, checks: dict):
+def submit_bonus(name: str, checks: dict, alt_task: str):
+    """
+    checks: 六個主項目的勾選狀態
+    alt_task: 替代任務對應的原任務名稱，例如 "次一手"，無則空字串
+    """
     ws = get_bonus_ws()
     now = datetime.now()
     weekday = WEEKDAY_MAP[now.weekday()]
@@ -89,7 +102,7 @@ def submit_bonus(name: str, checks: dict):
         "V" if checks.get("輸棋討論")   else "",
         "V" if checks.get("AI人機大戰") else "",
         "V" if checks.get("新銳循環賽") else "",
-        "V" if checks.get("替代任務")   else "",
+        alt_task,   # 替代任務：記錄等值的原任務名稱（或空白）
         "待審核",
     ]
     ws.append_row(row)
@@ -215,19 +228,27 @@ else:
 
     st.divider()
 
-    # ── 替代任務 ────────────────────────────────────────────────
-    checks["替代任務"] = st.checkbox(DISPLAY_MAP["替代任務"], key="替代任務")
+    # ── 替代任務（下拉選擇等值項目）────────────────────────────
+    st.markdown("#### 🔥 教練特批替代任務")
+    st.caption("教練有指定替代項目時，請選擇等值的原任務。")
+    alt_label = st.selectbox(
+        "替代任務等值項目",
+        options=list(ALT_TASK_OPTIONS.keys()),
+        label_visibility="collapsed",
+        key="alt_task_select",
+    )
+    alt_task = ALT_TASK_OPTIONS[alt_label]  # "" 或 "次一手" 等
 
     st.divider()
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📤 送出申請", type="primary", use_container_width=True):
-            if not any(checks.values()):
-                st.warning("請至少勾選一個項目再送出")
+            if not any(checks.values()) and not alt_task:
+                st.warning("請至少勾選一個項目，或選擇替代任務再送出")
             else:
                 with st.spinner("送出中..."):
-                    submit_bonus(name, checks)
+                    submit_bonus(name, checks, alt_task)
                 st.session_state.submitted = True
                 st.balloons()
                 st.rerun()

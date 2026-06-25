@@ -34,6 +34,7 @@ ITEM_COL_IDX = {
     "出席率": 4, "死活題": 5, "次一手": 6,
     "輸棋討論": 7, "AI人機大戰": 8, "新銳循環賽": 9,
 }
+ALT_COL       = 10   # K 欄，替代任務（記錄等值原任務名稱）
 STATUS_COL    = 11   # L 欄，審核狀態
 WEEKDAY_ZH    = ["一", "二", "三", "四", "五", "六", "日"]
 WEEKLY_TARGET = 4500    # 100,000 ÷ 22週 ≈ 每週理想進度
@@ -95,31 +96,36 @@ def approve_all_pending(all_data: list) -> int:
 
 def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.DataFrame:
     week_strs = {d.strftime("%Y-%m-%d") for d in week_dates}
-    # lookup[date_str][item] = "已核准" | "待審核" | ""
-    lookup: dict[str, dict] = {}
+    lookup: dict[str, dict] = {}      # date → {item: status}
+    lookup_alt: dict[str, tuple] = {} # date → (alt_task_name, status)
+
     for row in all_data[1:]:
         if len(row) > STATUS_COL and row[1] == player and row[2] in week_strs:
-            ds = row[2]
-            status = row[STATUS_COL]
+            ds, status = row[2], row[STATUS_COL]
             if ds not in lookup:
                 lookup[ds] = {}
             for item, col in ITEM_COL_IDX.items():
                 if col < len(row) and row[col] == "V":
                     lookup[ds][item] = status
+            # 替代任務
+            if len(row) > ALT_COL and row[ALT_COL].strip():
+                lookup_alt[ds] = (row[ALT_COL].strip(), status)
 
     rows = []
     for d in week_dates:
-        ds = d.strftime("%Y-%m-%d")
+        ds    = d.strftime("%Y-%m-%d")
         label = f"{d.strftime('%m/%d')}（{WEEKDAY_ZH[d.weekday()]}）"
         row_data = {"日期": label}
         for item in ITEM_COL_IDX:
             s = lookup.get(ds, {}).get(item, "")
-            if s == "已核准":
-                row_data[item] = "✅"
-            elif s == "待審核":
-                row_data[item] = "🟡"
-            else:
-                row_data[item] = "・"
+            row_data[item] = "✅" if s == "已核准" else ("🟡" if s == "待審核" else "・")
+        # 替代任務欄
+        alt = lookup_alt.get(ds)
+        if alt:
+            alt_name, alt_status = alt
+            row_data["🔥替代"] = f"✅{alt_name}" if alt_status == "已核准" else f"🟡{alt_name}"
+        else:
+            row_data["🔥替代"] = "・"
         rows.append(row_data)
 
     return pd.DataFrame(rows).set_index("日期")
@@ -131,11 +137,17 @@ def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int
     total_earned  = 0
     for row in all_data[1:]:
         if len(row) > STATUS_COL and row[1] == player and row[STATUS_COL] == "已核准":
+            # 六個主項目
             row_bonus = sum(
                 ITEM_PRICES[item]
                 for item, col in ITEM_COL_IDX.items()
                 if col < len(row) and row[col] == "V"
             )
+            # 替代任務（記錄的是等值原任務名稱，取對應金額）
+            if len(row) > ALT_COL:
+                alt = row[ALT_COL].strip()
+                if alt in ITEM_PRICES:
+                    row_bonus += ITEM_PRICES[alt]
             total_earned += row_bonus
             if row[2] in week_strs:
                 weekly_earned += row_bonus
@@ -267,11 +279,11 @@ st.dataframe(
     use_container_width=True,
     height=320,
     column_config={
-        item: st.column_config.TextColumn(
-            f"{item}\n${price}",
-            width="small",
-        )
-        for item, price in ITEM_PRICES.items()
+        **{
+            item: st.column_config.TextColumn(f"{item} ${price}", width="small")
+            for item, price in ITEM_PRICES.items()
+        },
+        "🔥替代": st.column_config.TextColumn("🔥替代任務", width="medium"),
     },
 )
 
