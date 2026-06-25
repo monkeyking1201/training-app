@@ -249,6 +249,15 @@ else:
 
 st.divider()
 
+# ── 暫時 Debug 區（確認資料後可刪除）────────────────────────────
+with st.expander("🔍 Debug：確認原始資料"):
+    st.write(f"Bonus_DB 共 {len(all_data)} 列（含 header）")
+    st.write(f"本週日期範圍：{[d.strftime('%Y-%m-%d') for d in week_dates]}")
+    for i, row in enumerate(all_data[:6]):
+        st.write(f"Row {i}： {row}")
+
+st.divider()
+
 # ══════════════════════════════════════════════════════════════════
 # 下半：院長熱圖矩陣
 # ══════════════════════════════════════════════════════════════════
