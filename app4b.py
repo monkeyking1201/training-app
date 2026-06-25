@@ -159,12 +159,21 @@ def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int
 def render_heatmap_html(df: pd.DataFrame) -> str:
     cols = list(df.columns)
 
-    # 表頭標籤：加上價格小字
+    # 表頭標籤：Emoji + 名稱 + 價格小字
+    EMOJI_MAP = {
+        "出席率":     "📍",
+        "死活題":     "🧩",
+        "次一手":     "🎯",
+        "輸棋討論":   "🗣️",
+        "AI人機大戰": "🤖",
+        "新銳循環賽": "⚔️",
+    }
     col_headers = {}
     for item, price in ITEM_PRICES.items():
+        emoji = EMOJI_MAP.get(item, "")
         col_headers[item] = (
             f'<span style="display:block;font-size:13px;font-weight:700;'
-            f'color:#374151;letter-spacing:0.04em;">{item}</span>'
+            f'color:#374151;letter-spacing:0.04em;">{emoji} {item}</span>'
             f'<span style="font-size:11px;font-weight:400;color:#9CA3AF;">${price}</span>'
         )
     col_headers["🔥替代"] = (
@@ -237,11 +246,11 @@ def render_heatmap_html(df: pd.DataFrame) -> str:
                     f'border-left:1px solid #FDE68A;">{inner}</td>'
                 )
             else:
+                # 未申報：純白空格，無任何視覺雜訊
                 html += (
                     f'<td style="background:{row_bg};padding:12px 16px;'
                     f'text-align:center;vertical-align:middle;'
-                    f'border-left:1px solid #F3F4F6;">'
-                    f'<span style="font-size:20px;color:#D1D5DB;">·</span></td>'
+                    f'border-left:1px solid #F3F4F6;">&nbsp;</td>'
                 )
         html += "</tr>"
 
@@ -279,7 +288,9 @@ html, body, .stApp {
 .block-container {
     padding-top:    2rem    !important;
     padding-bottom: 3rem    !important;
-    max-width:      1480px  !important;
+    max-width:      1200px  !important;
+    margin-left:    auto    !important;
+    margin-right:   auto    !important;
 }
 
 #MainMenu, footer, header { visibility: hidden; }
@@ -360,7 +371,7 @@ html, body, .stApp {
 /* 數值：大字、深色 */
 .kpi-value {
     font-family:    'Inter','SF Pro Display',sans-serif;
-    font-size:      42px;
+    font-size:      48px;
     font-weight:    800;
     color:          #1E3A8A;       /* 深藍 */
     line-height:    1.05;
@@ -581,7 +592,7 @@ with st.container(border=True):
       </div>
       <div class="kpi-card">
         <div class="{val_cls}">{achievement}%</div>
-        <div class="kpi-label">本週預算達成率</div>
+        <div class="kpi-label">【目標達成率】</div>
         <div class="kpi-note">{rate_note}</div>
         <div class="prog-wrap">
           <div class="prog-bar" style="width:{bar_width}%;background:{bar_color};"></div>
@@ -605,7 +616,8 @@ with st.container(border=True):
         'margin-right:8px;color:#065F46;">✓ 已核准</span>'
         '<span style="background:#FEF3C7;padding:2px 10px;border-radius:4px;'
         'margin-right:8px;color:#92400E;">⏳ 待審核</span>'
-        '<span style="color:#D1D5DB;margin-right:4px;">·</span> 未申報'
+        '<span style="background:#F9FAFB;padding:2px 10px;border-radius:4px;'
+        'border:1px solid #E5E7EB;color:#9CA3AF;">空白 未申報</span>'
         '</div>',
         unsafe_allow_html=True,
     )
