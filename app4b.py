@@ -1,5 +1,5 @@
 """
-App 4B — 教練審核 + 院長熱圖戰情端  (UI v3 — McKinsey Dark Command Center)
+App 4B — 教練審核 + 院長熱圖戰情端  (UI v4 — Notion Light)
 """
 
 import streamlit as st
@@ -155,83 +155,98 @@ def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int
     return weekly_earned, achievement, total_earned
 
 
-# ── Pandas Styler：暗色主題色塊化熱圖 ────────────────────────────
-def _cell_style(val: str) -> str:
-    v = str(val)
-    if v.startswith("✅"):
-        # 柔和微光綠，不刺眼
-        return (
-            "background-color: rgba(34,197,94,0.15);"
-            "color: #4ade80;"
-            "font-weight: 700;"
-            "text-align: center;"
+# ── HTML 熱圖渲染（取代 st.dataframe，獲得完整 CSS 控制權）────────
+def render_heatmap_html(df: pd.DataFrame) -> str:
+    cols = list(df.columns)
+
+    # 表頭標籤：加上價格小字
+    col_headers = {}
+    for item, price in ITEM_PRICES.items():
+        col_headers[item] = (
+            f'<span style="display:block;font-size:13px;font-weight:700;'
+            f'color:#374151;letter-spacing:0.04em;">{item}</span>'
+            f'<span style="font-size:11px;font-weight:400;color:#9CA3AF;">${price}</span>'
         )
-    if v.startswith("🟡"):
-        # 柔和琥珀
-        return (
-            "background-color: rgba(234,179,8,0.15);"
-            "color: #fbbf24;"
-            "font-weight: 700;"
-            "text-align: center;"
-        )
-    # 未申報
-    return (
-        "background-color: rgba(148,163,184,0.06);"
-        "color: #475569;"
-        "text-align: center;"
+    col_headers["🔥替代"] = (
+        '<span style="display:block;font-size:13px;font-weight:700;'
+        'color:#374151;letter-spacing:0.04em;">🔥 替代任務</span>'
     )
 
-def style_heatmap(df: pd.DataFrame):
-    try:
-        styler = df.style.map(_cell_style)        # pandas ≥ 2.1
-    except AttributeError:
-        styler = df.style.applymap(_cell_style)   # pandas < 2.1
+    # 表格外框
+    html = (
+        '<div style="overflow-x:auto;border-radius:14px;'
+        'border:1px solid #E5E7EB;box-shadow:0 1px 4px rgba(0,0,0,0.05);">'
+        '<table style="width:100%;border-collapse:collapse;'
+        'font-family:\'Inter\',\'Helvetica Neue\',sans-serif;">'
+    )
 
-    styler.set_properties(**{
-        "padding":     "11px 18px",
-        "font-size":   "1.02rem",
-        "line-height": "1.9",
-        "border":      "none",
-        "font-family": "'Inter','SF Pro Display','Helvetica Neue',sans-serif",
-    })
-    styler.set_table_styles([
-        {"selector": "thead th", "props": [
-            ("background-color", "rgba(15,23,42,0.95)"),
-            ("color",            "#64748b"),
-            ("font-size",        "0.7rem"),
-            ("font-weight",      "700"),
-            ("letter-spacing",   "0.09em"),
-            ("text-transform",   "uppercase"),
-            ("padding",          "10px 18px"),
-            ("border",           "none"),
-            ("border-bottom",    "1px solid rgba(255,255,255,0.08)"),
-        ]},
-        {"selector": "td", "props": [
-            ("border-top",    "none"),
-            ("border-left",   "none"),
-            ("border-right",  "none"),
-            ("border-bottom", "1px solid rgba(255,255,255,0.06)"),
-        ]},
-        {"selector": "table", "props": [
-            ("border-collapse", "collapse"),
-            ("width",           "100%"),
-            ("background-color","transparent"),
-        ]},
-        {"selector": "tbody tr:hover td", "props": [
-            ("filter", "brightness(1.25)"),
-        ]},
-        # 日期 index 欄
-        {"selector": "th.row_heading", "props": [
-            ("background-color", "rgba(15,23,42,0.95)"),
-            ("color",            "#94a3b8"),
-            ("font-weight",      "600"),
-            ("font-size",        "0.85rem"),
-            ("border",           "none"),
-            ("border-bottom",    "1px solid rgba(255,255,255,0.06)"),
-            ("padding",          "11px 18px"),
-        ]},
-    ])
-    return styler
+    # 表頭列
+    html += (
+        '<thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">'
+        '<th style="padding:14px 20px;text-align:left;font-size:13px;'
+        'font-weight:700;color:#374151;letter-spacing:0.05em;'
+        'text-transform:uppercase;white-space:nowrap;">日 期</th>'
+    )
+    for col in cols:
+        html += (
+            f'<th style="padding:14px 16px;text-align:center;vertical-align:middle;">'
+            f'{col_headers.get(col, col)}</th>'
+        )
+    html += "</tr></thead><tbody>"
+
+    # 資料列
+    for i, (idx, row) in enumerate(df.iterrows()):
+        row_bg = "#FFFFFF" if i % 2 == 0 else "#FAFAFA"
+        html += (
+            f'<tr style="background:{row_bg};border-bottom:1px solid #F3F4F6;">'
+            f'<td style="padding:14px 20px;font-size:15px;font-weight:600;'
+            f'color:#374151;white-space:nowrap;">{idx}</td>'
+        )
+        for col in cols:
+            val = str(row[col])
+            if val.startswith("✅"):
+                extra = val[2:].strip()
+                inner = (
+                    '<span style="font-size:20px;color:#065F46;font-weight:700;'
+                    'line-height:1;">✓</span>'
+                )
+                if extra:
+                    inner += (
+                        f'<br><span style="font-size:12px;color:#065F46;'
+                        f'font-weight:600;">{extra}</span>'
+                    )
+                html += (
+                    f'<td style="background:#D1FAE5;padding:12px 16px;'
+                    f'text-align:center;vertical-align:middle;'
+                    f'border-left:1px solid #A7F3D0;">{inner}</td>'
+                )
+            elif val.startswith("🟡"):
+                extra = val[2:].strip()
+                inner = (
+                    '<span style="font-size:18px;color:#92400E;font-weight:700;'
+                    'line-height:1;">⏳</span>'
+                )
+                if extra:
+                    inner += (
+                        f'<br><span style="font-size:12px;color:#92400E;'
+                        f'font-weight:600;">{extra}</span>'
+                    )
+                html += (
+                    f'<td style="background:#FEF3C7;padding:12px 16px;'
+                    f'text-align:center;vertical-align:middle;'
+                    f'border-left:1px solid #FDE68A;">{inner}</td>'
+                )
+            else:
+                html += (
+                    f'<td style="background:{row_bg};padding:12px 16px;'
+                    f'text-align:center;vertical-align:middle;'
+                    f'border-left:1px solid #F3F4F6;">'
+                    f'<span style="font-size:20px;color:#D1D5DB;">·</span></td>'
+                )
+        html += "</tr>"
+
+    html += "</tbody></table></div>"
+    return html
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -246,148 +261,161 @@ st.set_page_config(
 st.markdown("""
 <style>
 /* ═══════════════════════════════════════════════
-   0. 字體 & 全域 Reset
+   0. 字體載入
 ═══════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; }
+/* ═══════════════════════════════════════════════
+   1. 全域 Reset & 背景
+═══════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
 
 html, body, .stApp {
     font-family: 'Inter','SF Pro Display','Helvetica Neue',sans-serif !important;
-    background-color: #080d1a !important;
-    color: #e2e8f0 !important;
+    background-color: #F8F9FA !important;
+    color: #111827 !important;
 }
 
-/* ═══════════════════════════════════════════════
-   1. 移除頂部間距、限制最大寬度
-═══════════════════════════════════════════════ */
 .block-container {
-    padding-top:    1.6rem  !important;
+    padding-top:    2rem    !important;
     padding-bottom: 3rem    !important;
     max-width:      1480px  !important;
 }
 
+#MainMenu, footer, header { visibility: hidden; }
+
 /* ═══════════════════════════════════════════════
    2. 卡片容器（st.container border=True）
-      → 暗色玻璃面板
 ═══════════════════════════════════════════════ */
 [data-testid="stVerticalBlockBorderWrapper"] > div {
-    background:    rgba(255,255,255,0.03)  !important;
-    border:        1px solid rgba(255,255,255,0.09) !important;
-    border-radius: 16px  !important;
-    box-shadow:    0 0 0 1px rgba(255,255,255,0.04),
-                   0 8px 32px rgba(0,0,0,0.35)  !important;
-    padding:       8px 6px !important;
+    background:    #FFFFFF                              !important;
+    border:        1px solid #E5E7EB                    !important;
+    border-radius: 16px                                 !important;
+    box-shadow:    0 4px 6px -1px rgba(0,0,0,0.05),
+                   0 2px 4px -1px rgba(0,0,0,0.03)     !important;
+    padding:       8px 6px                              !important;
 }
 
 /* ═══════════════════════════════════════════════
-   3. Dataframe 容器 → 融入暗色
+   3. 頁首文字
 ═══════════════════════════════════════════════ */
-[data-testid="stDataFrame"] {
-    border-radius: 12px !important;
-    overflow:      hidden !important;
-    border:        1px solid rgba(255,255,255,0.08) !important;
-    background:    rgba(15,23,42,0.7) !important;
+.page-brand {
+    font-family:   'Inter','SF Pro Display',sans-serif;
+    font-size:     24px;
+    font-weight:   800;
+    color:         #111827;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
 }
 
-/* Streamlit 自動生成的 iframe 裡 table */
-[data-testid="stDataFrame"] iframe {
-    background: transparent !important;
+.page-subtitle {
+    font-size:     14px;
+    color:         #6B7280;
+    margin-bottom: 28px;
+    font-weight:   500;
 }
 
 /* ═══════════════════════════════════════════════
-   4. 選手大名字 → 白色 / 科技銀
+   4. 選手大名字
 ═══════════════════════════════════════════════ */
 .big-name {
-    font-family:   'Inter','SF Pro Display','Helvetica Neue',sans-serif !important;
-    font-size:     3.4rem   !important;
-    font-weight:   900      !important;
-    color:         #F1F5F9  !important;   /* 科技銀白，清晰有威信 */
-    letter-spacing: 10px    !important;
-    text-align:    center   !important;
-    padding:       16px 0 4px !important;
-    text-shadow:   0 0 40px rgba(148,163,184,0.25);
+    font-family:    'Inter','SF Pro Display',sans-serif !important;
+    font-size:      60px          !important;
+    font-weight:    800           !important;
+    color:          #111827       !important;
+    letter-spacing: 6px           !important;
+    text-align:     center        !important;
+    padding:        20px 0 4px    !important;
+    text-shadow:    none          !important;
+    line-height:    1.1           !important;
+}
+
+.week-label {
+    text-align:    center;
+    color:         #6B7280;
+    font-size:     15px;
+    font-weight:   500;
+    margin-bottom: 24px;
 }
 
 /* ═══════════════════════════════════════════════
-   5. KPI 卡片 → 微透光暗色面板
+   5. KPI 卡片（純 HTML，外層容器）
 ═══════════════════════════════════════════════ */
 .kpi-row {
-    display:         flex;
-    gap:             16px;
-    margin-bottom:   24px;
+    display:       flex;
+    gap:           16px;
+    margin-bottom: 28px;
 }
 
 .kpi-card {
-    flex:            1;
-    background:      rgba(255,255,255,0.03) !important;
-    border:          1px solid rgba(255,255,255,0.10) !important;
-    border-radius:   12px !important;
-    padding:         20px 24px !important;
-    box-shadow:      0 0 0 1px rgba(255,255,255,0.03),
-                     0 4px 20px rgba(0,0,0,0.3) !important;
+    flex:          1;
+    background:    #FFFFFF;
+    border:        1px solid #E5E7EB;
+    border-radius: 14px;
+    padding:       24px 28px;
+    box-shadow:    0 4px 6px -1px rgba(0,0,0,0.05),
+                   0 2px 4px -1px rgba(0,0,0,0.03);
 }
 
-/* 數值：大字、亮色 */
+/* 數值：大字、深色 */
 .kpi-value {
-    font-family:   'Inter','SF Pro Display',sans-serif;
-    font-size:     2.1rem;
-    font-weight:   700;
-    color:         #38bdf8;          /* 科技藍 */
-    line-height:   1.1;
-    letter-spacing: -0.02em;
+    font-family:    'Inter','SF Pro Display',sans-serif;
+    font-size:      42px;
+    font-weight:    800;
+    color:          #1E3A8A;       /* 深藍 */
+    line-height:    1.05;
+    letter-spacing: -0.03em;
 }
 .kpi-value-warn {
-    font-size:     2.1rem;
-    font-weight:   700;
-    color:         #fb7185 !important;   /* 珊瑚紅（< 70%） */
-    line-height:   1.1;
-    letter-spacing: -0.02em;
+    font-size:     42px;
+    font-weight:   800;
+    color:         #DC2626;        /* 正紅（< 70%） */
+    line-height:   1.05;
+    letter-spacing: -0.03em;
 }
 .kpi-value-amber {
-    font-size:     2.1rem;
-    font-weight:   700;
-    color:         #fbbf24 !important;   /* 琥珀橙 */
-    line-height:   1.1;
-    letter-spacing: -0.02em;
+    font-size:     42px;
+    font-weight:   800;
+    color:         #D97706;        /* 琥珀橙 */
+    line-height:   1.05;
+    letter-spacing: -0.03em;
 }
 .kpi-value-ok {
-    font-size:     2.1rem;
-    font-weight:   700;
-    color:         #4ade80 !important;   /* 微光綠 */
-    line-height:   1.1;
-    letter-spacing: -0.02em;
+    font-size:     42px;
+    font-weight:   800;
+    color:         #059669;        /* 翠綠 */
+    line-height:   1.05;
+    letter-spacing: -0.03em;
 }
 
-/* 標籤：小字、優雅灰藍 */
+/* 標籤：16px 深灰 */
 .kpi-label {
-    font-family:   'Inter','SF Pro Display',sans-serif;
-    font-size:     0.7rem;
-    font-weight:   600;
-    color:         #94A3B8 !important;  /* 灰藍 */
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-top:    6px;
+    font-family:    'Inter','SF Pro Display',sans-serif;
+    font-size:      16px;
+    font-weight:    500;
+    color:          #4B5563;
+    margin-top:     8px;
 }
 
 .kpi-note {
-    font-size:   0.78rem;
-    color:       #64748b;
-    margin-top:  4px;
+    font-size:  14px;
+    color:      #9CA3AF;
+    margin-top: 4px;
+    font-weight: 500;
 }
 
 /* ═══════════════════════════════════════════════
    6. 進度條
 ═══════════════════════════════════════════════ */
 .prog-wrap {
-    background:    rgba(255,255,255,0.08);
+    background:    #E5E7EB;
     border-radius: 999px;
-    height:        6px;
-    margin-top:    10px;
+    height:        8px;
+    margin-top:    12px;
     overflow:      hidden;
 }
 .prog-bar {
-    height:        6px;
+    height:        8px;
     border-radius: 999px;
 }
 
@@ -396,110 +424,68 @@ html, body, .stApp {
 ═══════════════════════════════════════════════ */
 .sec-label {
     font-family:    'Inter','SF Pro Display',sans-serif;
-    font-size:      0.7rem;
+    font-size:      11px;
     font-weight:    700;
-    color:          #64748b;
-    letter-spacing: 0.13em;
+    color:          #9CA3AF;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
     padding-bottom: 10px;
-    border-bottom:  1px solid rgba(255,255,255,0.08);
-    margin-bottom:  16px;
+    border-bottom:  1px solid #F3F4F6;
+    margin-bottom:  20px;
 }
 
 /* ═══════════════════════════════════════════════
-   8. 週期標籤
-═══════════════════════════════════════════════ */
-.week-label {
-    text-align:    center;
-    color:         #64748b;
-    font-size:     0.88rem;
-    margin-bottom: 20px;
-}
-
-/* ═══════════════════════════════════════════════
-   9. 待審核 Badge
+   8. 待審核 Badge
 ═══════════════════════════════════════════════ */
 .pending-badge {
     display:       inline-block;
-    background:    rgba(251,191,36,0.12);
-    border:        1px solid rgba(251,191,36,0.35);
+    background:    #FEF3C7;
+    border:        1px solid #FCD34D;
     border-radius: 20px;
     padding:       5px 16px;
     margin:        4px;
-    font-size:     0.86rem;
+    font-size:     14px;
     font-weight:   600;
-    color:         #fbbf24;
+    color:         #92400E;
 }
 
 /* ═══════════════════════════════════════════════
-   10. 頁首文字
-═══════════════════════════════════════════════ */
-.page-eyebrow {
-    font-size:      0.7rem;
-    font-weight:    700;
-    color:          #334155;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    margin-bottom:  4px;
-}
-.page-heading {
-    font-size:     1.85rem;
-    font-weight:   900;
-    color:         #f1f5f9;
-    margin-bottom: 28px;
-    letter-spacing: -0.01em;
-}
-
-/* ═══════════════════════════════════════════════
-   11. Legend
+   9. 圖例
 ═══════════════════════════════════════════════ */
 .legend {
-    font-size:  0.78rem;
-    color:      #475569;
-    text-align: center;
-    margin-top: 8px;
+    font-size:   13px;
+    color:       #9CA3AF;
+    text-align:  center;
+    margin-top:  12px;
+    font-weight: 500;
 }
 
 /* ═══════════════════════════════════════════════
-   12. Streamlit 原生元件覆寫
+   10. Streamlit 原生元件
 ═══════════════════════════════════════════════ */
-
-/* 頁面隱藏多餘元素 */
-#MainMenu, footer, header { visibility: hidden; }
-
-/* Success / info / warning 訊息盒 */
 [data-testid="stAlert"] {
-    background:    rgba(255,255,255,0.04) !important;
-    border:        1px solid rgba(255,255,255,0.1) !important;
     border-radius: 10px !important;
-    color:         #e2e8f0 !important;
 }
 
-/* 按鈕 */
 .stButton > button {
     border-radius:  10px !important;
     font-family:    'Inter',sans-serif !important;
     font-weight:    600 !important;
+    font-size:      14px !important;
     letter-spacing: 0.02em !important;
 }
 
-/* Selectbox */
 .stSelectbox > div > div {
-    background-color: rgba(255,255,255,0.04) !important;
-    border:           1px solid rgba(255,255,255,0.12) !important;
-    color:            #f1f5f9 !important;
-    border-radius:    10px !important;
+    border-radius: 10px !important;
+    font-family:   'Inter',sans-serif !important;
 }
 .stSelectbox label {
-    color:     #64748b !important;
-    font-size: 0.78rem !important;
+    font-size:   13px !important;
+    color:       #6B7280 !important;
+    font-weight: 500 !important;
 }
 
-/* Divider */
-hr { border-color: rgba(255,255,255,0.07) !important; margin: 20px 0 !important; }
-
-/* Spinner text */
-[data-testid="stSpinner"] p { color: #94a3b8 !important; }
+hr { border-color: #F3F4F6 !important; margin: 20px 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -509,9 +495,13 @@ all_data   = load_bonus_data()
 week_dates = get_week_dates()
 players    = load_player_list()
 
-# ── 頁面標題 ──────────────────────────────────────────────────────
-st.markdown('<div class="page-eyebrow">新銳圍棋學院</div>', unsafe_allow_html=True)
-st.markdown('<div class="page-heading">📊 訓練獎金戰情台</div>', unsafe_allow_html=True)
+# ── 頁首 ─────────────────────────────────────────────────────────
+today_str_header = date.today().strftime("%Y 年 %m 月 %d 日")
+st.markdown('<div class="page-brand">新銳隊</div>', unsafe_allow_html=True)
+st.markdown(
+    f'<div class="page-subtitle">📊 訓練獎金戰情台　·　{today_str_header}</div>',
+    unsafe_allow_html=True,
+)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -520,20 +510,19 @@ st.markdown('<div class="page-heading">📊 訓練獎金戰情台</div>', unsafe
 with st.container(border=True):
     st.markdown('<div class="sec-label">🔍 今日審核台</div>', unsafe_allow_html=True)
 
-    pending     = get_pending_today(all_data)
-    today_label = date.today().strftime("%Y / %m / %d")
+    pending = get_pending_today(all_data)
 
     if not pending:
-        st.success(f"✅ {today_label}　今日無待審核申報")
+        st.success(f"✅ 今日無待審核申報")
     else:
         st.markdown(
-            f"<span style='font-weight:600;font-size:1rem;color:#e2e8f0;'>"
-            f"{today_label}　待審核：{len(pending)} 筆</span>",
+            f"<span style='font-size:16px;font-weight:600;color:#111827;'>"
+            f"待審核：{len(pending)} 筆</span>",
             unsafe_allow_html=True,
         )
         st.write("")
         badge_html = "".join(
-            f'<span class="pending-badge">🟡 {name}</span>'
+            f'<span class="pending-badge">⏳ {name}</span>'
             for _, name in pending
         )
         st.markdown(badge_html, unsafe_allow_html=True)
@@ -559,7 +548,7 @@ with st.container(border=True):
     # 選手下拉
     selected = st.selectbox("選擇選手", players, label_visibility="collapsed")
 
-    # 大名字（科技銀白）
+    # 大名字（純黑 60px，無陰影）
     st.markdown(f'<div class="big-name">{selected}</div>', unsafe_allow_html=True)
     week_start = week_dates[0].strftime("%m/%d")
     week_end   = week_dates[6].strftime("%m/%d")
@@ -572,19 +561,18 @@ with st.container(border=True):
     weekly_earned, achievement, total_earned = calc_bonus(selected, week_dates, all_data)
     remaining = PROJECT_TOTAL - total_earned
 
-    # 達成率樣式
     if achievement < 70:
-        val_cls, rate_note, bar_color = "kpi-value-warn",  "進度落後 ⚠️",  "#fb7185"
+        val_cls, rate_note, bar_color = "kpi-value-warn",  "進度落後 ⚠️",  "#EF4444"
     elif achievement < 90:
-        val_cls, rate_note, bar_color = "kpi-value-amber", "需加速 ⚡",    "#fbbf24"
+        val_cls, rate_note, bar_color = "kpi-value-amber", "需加速 ⚡",    "#D97706"
     elif achievement <= 110:
-        val_cls, rate_note, bar_color = "kpi-value-ok",    "進度完美 ✅",  "#4ade80"
+        val_cls, rate_note, bar_color = "kpi-value-ok",    "進度完美 ✅",  "#059669"
     else:
-        val_cls, rate_note, bar_color = "kpi-value-amber", "超前燃燒 🔥", "#fbbf24"
+        val_cls, rate_note, bar_color = "kpi-value-amber", "超前燃燒 🔥", "#D97706"
 
     bar_width = min(achievement, 100)
 
-    # ── 三格 KPI 卡片（熱圖上方）────────────────────────────────
+    # ── KPI 卡片（在熱圖上方）───────────────────────────────────
     st.markdown(f"""
     <div class="kpi-row">
       <div class="kpi-card">
@@ -606,25 +594,19 @@ with st.container(border=True):
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 熱圖 ─────────────────────────────────────────────────────
-    df     = build_heatmap(selected, week_dates, all_data)
-    styled = style_heatmap(df)
-
-    st.dataframe(
-        styled,
-        use_container_width=True,
-        height=320,
-        column_config={
-            **{
-                item: st.column_config.TextColumn(f"{item} ${price}", width="small")
-                for item, price in ITEM_PRICES.items()
-            },
-            "🔥替代": st.column_config.TextColumn("🔥替代任務", width="medium"),
-        },
-    )
+    # ── HTML 熱圖（df.to_html 替代方案，獲得完整 CSS 控制）──────
+    df       = build_heatmap(selected, week_dates, all_data)
+    heatmap_html = render_heatmap_html(df)
+    st.markdown(heatmap_html, unsafe_allow_html=True)
 
     st.markdown(
-        '<div class="legend">✅ 已核准　🟡 待審核　・ 未申報</div>',
+        '<div class="legend">'
+        '<span style="background:#D1FAE5;padding:2px 10px;border-radius:4px;'
+        'margin-right:8px;color:#065F46;">✓ 已核准</span>'
+        '<span style="background:#FEF3C7;padding:2px 10px;border-radius:4px;'
+        'margin-right:8px;color:#92400E;">⏳ 待審核</span>'
+        '<span style="color:#D1D5DB;margin-right:4px;">·</span> 未申報'
+        '</div>',
         unsafe_allow_html=True,
     )
 
