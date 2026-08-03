@@ -73,15 +73,31 @@ def load_pin_table() -> dict:
     return {str(row[1]).strip(): row[0].strip()
             for row in rows if len(row) >= 2 and row[1].strip()}
 
-def already_submitted_today(name: str) -> bool:
-    """只在登入後呼叫一次，結果存入 session_state"""
+def already_submitted_today(name: str) -> tuple:
+    """只在登入後呼叫一次，回傳 (已送出bool, 申報明細dict or None)"""
     ws = get_bonus_ws()
     today_str = date.today().strftime("%Y-%m-%d")
     all_rows = ws.get_all_values()
     for row in all_rows[1:]:
         if len(row) >= 3 and row[1] == name and row[2] == today_str:
-            return True
-    return False
+            # 找審核狀態（容忍多餘欄位）
+            status = ""
+            for v in row[11:]:
+                if v.strip() in ("待審核", "已核准"):
+                    status = v.strip()
+                    break
+            detail = {
+                "出席率":     len(row) > 4  and row[4]  == "V",
+                "死活題":     len(row) > 5  and row[5]  == "V",
+                "次一手":     len(row) > 6  and row[6]  == "V",
+                "輸棋討論":   len(row) > 7  and row[7]  == "V",
+                "AI人機大戰": len(row) > 8  and row[8]  == "V",
+                "新銳循環賽": len(row) > 9  and row[9]  == "V",
+                "替代任務":   row[10].strip() if len(row) > 10 else "",
+                "審核狀態":   status,
+            }
+            return True, detail
+    return False, None
 
 def submit_bonus(name: str, checks: dict, alt_task: str):
     """
@@ -149,6 +165,8 @@ if "already_done" not in st.session_state:
     st.session_state.already_done = False
 if "done_checked" not in st.session_state:
     st.session_state.done_checked = False
+if "today_detail" not in st.session_state:
+    st.session_state.today_detail = None
 
 # ══════════════════════════════════════════════════════════════════
 # 畫面 A：登入
@@ -195,18 +213,78 @@ else:
 
     # 已送出判斷（只在登入後執行一次，避免重複打 API）
     if not st.session_state.done_checked:
-        st.session_state.already_done = already_submitted_today(name)
+        done, detail = already_submitted_today(name)
+        st.session_state.already_done = done
+        st.session_state.today_detail = detail
         st.session_state.done_checked = True
 
     if st.session_state.already_done or st.session_state.submitted:
-        st.success("✅ 今日申報完成，等待教練審核！")
-        st.info("明天訓練結束後再回來申報。")
+        detail = st.session_state.today_detail
+
+        # ── 審核狀態 banner ──────────────────────────────────────
+        if detail and detail["審核狀態"] == "已核准":
+            st.success("🎉 今日申報已核准！獎金入袋！")
+        else:
+            st.success("✅ 今日申報完成，等待教練審核！")
+
+        # ── 申報明細卡片 ─────────────────────────────────────────
+        if detail:
+            ITEM_LABELS = [
+                ("出席率",     "📍 今日出席"),
+                ("死活題",     "🧩 專項死活題"),
+                ("次一手",     "🎯 關鍵次一手"),
+                ("輸棋討論",   "🗣️ 輸棋討論"),
+                ("AI人機大戰", "🤖 AI人機大戰"),
+                ("新銳循環賽", "⚔️ 新銳循環賽"),
+            ]
+            done_items = [label for key, label in ITEM_LABELS if detail.get(key)]
+            alt = detail.get("替代任務", "")
+            status = detail.get("審核狀態", "待審核")
+
+            status_badge = (
+                "<span style='background:#D1FAE5;color:#065F46;padding:3px 12px;"
+                "border-radius:12px;font-weight:700;font-size:0.9rem;'>✅ 已核准</span>"
+                if status == "已核准" else
+                "<span style='background:#FEF3C7;color:#92400E;padding:3px 12px;"
+                "border-radius:12px;font-weight:700;font-size:0.9rem;'>⏳ 待審核</span>"
+            )
+
+            items_html = "".join(
+                f"<div style='padding:6px 0;font-size:1rem;'>✓ &nbsp;{lbl}</div>"
+                for lbl in done_items
+            )
+            if alt:
+                items_html += (
+                    f"<div style='padding:6px 0;font-size:1rem;color:#b45309;'>"
+                    f"🔥 替代任務：{alt}</div>"
+                )
+            if not done_items and not alt:
+                items_html = "<div style='color:#aaa;'>（無申報項目）</div>"
+
+            st.markdown(f"""
+            <div style='background:#fff;border:1px solid #E5E7EB;border-radius:14px;
+                        padding:20px 24px;margin:12px 0;
+                        box-shadow:0 2px 8px rgba(0,0,0,0.05);'>
+                <div style='font-size:0.8rem;color:#9CA3AF;font-weight:600;
+                            letter-spacing:0.08em;text-transform:uppercase;
+                            margin-bottom:10px;'>今日申報明細</div>
+                {items_html}
+                <div style='margin-top:14px;border-top:1px solid #F3F4F6;
+                            padding-top:12px;'>
+                    審核狀態：{status_badge}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.caption("明天訓練結束後再回來申報。")
+        st.write("")
         if st.button("登出", use_container_width=True):
             st.session_state.authenticated = False
             st.session_state.player_name = ""
             st.session_state.submitted = False
             st.session_state.already_done = False
             st.session_state.done_checked = False
+            st.session_state.today_detail = None
             st.rerun()
         st.stop()
 
@@ -250,6 +328,16 @@ else:
                 with st.spinner("送出中..."):
                     submit_bonus(name, checks, alt_task)
                 st.session_state.submitted = True
+                st.session_state.today_detail = {
+                    "出席率":     checks.get("出席率",     False),
+                    "死活題":     checks.get("死活題",     False),
+                    "次一手":     checks.get("次一手",     False),
+                    "輸棋討論":   checks.get("輸棋討論",   False),
+                    "AI人機大戰": checks.get("AI人機大戰", False),
+                    "新銳循環賽": checks.get("新銳循環賽", False),
+                    "替代任務":   alt_task,
+                    "審核狀態":   "待審核",
+                }
                 st.balloons()
                 st.rerun()
     with col2:
