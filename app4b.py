@@ -100,6 +100,13 @@ def approve_all_pending(all_data: list) -> int:
         load_bonus_data.clear()
     return len(cells)
 
+def approve_one(row_idx: int, all_data: list) -> None:
+    """核准單一筆（row_idx 為 Google Sheet 的 1-based 列號）"""
+    row = all_data[row_idx - 1]   # all_data 是 0-based，row_idx=2 → all_data[1]
+    col = row_status_idx_1based(row)
+    get_bonus_ws().update_cell(row_idx, col, "已核准")
+    load_bonus_data.clear()
+
 def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.DataFrame:
     week_strs  = {d.strftime("%Y-%m-%d") for d in week_dates}
     lookup     : dict[str, dict]  = {}
@@ -532,12 +539,25 @@ with st.container(border=True):
             unsafe_allow_html=True,
         )
         st.write("")
-        badge_html = "".join(
-            f'<span class="pending-badge">⏳ {name}</span>'
-            for _, name in pending
-        )
-        st.markdown(badge_html, unsafe_allow_html=True)
-        st.write("")
+
+        # ── 個別核准列表 ──────────────────────────────────────────
+        for row_idx, name in pending:
+            col_name, col_btn = st.columns([5, 1])
+            with col_name:
+                st.markdown(
+                    f'<div style="padding:8px 0;">'
+                    f'<span class="pending-badge">⏳ {name}</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with col_btn:
+                if st.button("✅ 核准", key=f"approve_{row_idx}"):
+                    with st.spinner(f"核准 {name}..."):
+                        approve_one(row_idx, all_data)
+                    st.rerun()
+
+        st.divider()
+
+        # ── 一鍵全部核准 ─────────────────────────────────────────
         if st.button("✅ 一鍵核准今日全部", type="primary"):
             with st.spinner("核准中..."):
                 count    = approve_all_pending(all_data)
