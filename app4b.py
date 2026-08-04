@@ -23,7 +23,14 @@ ITEM_PRICES = {
     "次一手":     400,
     "輸棋討論":   400,
     "AI人機大戰": 400,
-    "新銳循環賽": 1000,
+    "新銳循環賽": 600,    # 原 1000，調整為 600
+}
+
+# 替代任務專屬獎金（與主項目分開計算）
+ALT_TASK_PRICES = {
+    "運動":   300,
+    "交流":   300,
+    "讀書會": 300,
 }
 ITEM_COL_IDX = {
     "出席率": 4, "死活題": 5, "次一手": 6,
@@ -153,8 +160,8 @@ def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int
             )
             if len(row) > ALT_COL:
                 alt = row[ALT_COL].strip()
-                if alt in ITEM_PRICES:
-                    rb += ITEM_PRICES[alt]
+                if alt in ALT_TASK_PRICES:
+                    rb += ALT_TASK_PRICES[alt]
             total_earned += rb
             if row[2] in week_strs:
                 weekly_earned += rb
