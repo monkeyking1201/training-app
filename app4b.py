@@ -40,7 +40,10 @@ ALT_COL       = 10
 STATUS_COL    = 11
 WEEKDAY_ZH    = ["一", "二", "三", "四", "五", "六", "日"]
 WEEKLY_TARGET = 4500
-PROJECT_TOTAL = 100_000
+PROJECT_TOTAL = 100_000          # 每位正式選手各有 $100,000 專案額度
+
+# 生力軍：練習參與打卡系統，不計入實際獎金發放
+TRAINEE_PLAYERS = ["陳天宸", "楊昕潔"]
 
 
 # ── 狀態欄位 helpers（容忍多餘欄位）─────────────────────────────
@@ -177,12 +180,16 @@ def calc_monthly_bonus_one(player: str, year: int, month: int, all_data: list) -
                 total += ALT_TASK_PRICES[row[ALT_COL].strip()]
     return {"total": total, "days": days, "item_counts": item_counts, "alt_count": alt_count}
 
-def render_monthly_table_html(summary: list) -> str:
-    """summary: list of {name, total, days, item_counts, alt_count}"""
-    summary = sorted(summary, key=lambda x: x["total"], reverse=True)
-    grand   = sum(s["total"] for s in summary)
-    ITEMS   = ["出席率", "死活題", "次一手", "輸棋討論", "AI人機大戰", "新銳循環賽"]
-    EMOJIS  = {"出席率":"📍","死活題":"🧩","次一手":"🎯","輸棋討論":"🗣️","AI人機大戰":"🤖","新銳循環賽":"⚔️"}
+def render_monthly_table_html(summary: list, trainee_names: set) -> str:
+    """summary: list of {name, total, days, item_counts, alt_count}
+       trainee_names: set of names that are trainees (no actual payout)
+    """
+    paying   = sorted([s for s in summary if s["name"] not in trainee_names],
+                      key=lambda x: x["total"], reverse=True)
+    trainees = [s for s in summary if s["name"] in trainee_names]
+    grand    = sum(s["total"] for s in paying)
+    ITEMS    = ["出席率", "死活題", "次一手", "輸棋討論", "AI人機大戰", "新銳循環賽"]
+    EMOJIS   = {"出席率":"📍","死活題":"🧩","次一手":"🎯","輸棋討論":"🗣️","AI人機大戰":"🤖","新銳循環賽":"⚔️"}
 
     html = (
         '<div style="overflow-x:auto;border-radius:14px;'
@@ -198,12 +205,10 @@ def render_monthly_table_html(summary: list) -> str:
         '<th style="padding:12px 20px;text-align:left;font-size:13px;font-weight:700;color:#374151;">姓 名</th>'
     )
     for item in ITEMS:
-        e = EMOJIS[item]
-        p = ITEM_PRICES[item]
         html += (
             f'<th style="padding:10px 14px;text-align:center;vertical-align:middle;">'
-            f'<span style="display:block;font-size:15px;">{e}</span>'
-            f'<span style="font-size:11px;font-weight:400;color:#9CA3AF;">${p}</span></th>'
+            f'<span style="display:block;font-size:15px;">{EMOJIS[item]}</span>'
+            f'<span style="font-size:11px;font-weight:400;color:#9CA3AF;">${ITEM_PRICES[item]}</span></th>'
         )
     html += (
         '<th style="padding:10px 12px;text-align:center;vertical-align:middle;">'
@@ -213,60 +218,94 @@ def render_monthly_table_html(summary: list) -> str:
         '</tr></thead><tbody>'
     )
 
-    medals = ["🥇","🥈","🥉"]
-    for rank, s in enumerate(summary, 1):
-        bg  = "#FFFFFF" if rank % 2 == 1 else "#FAFAFA"
-        tag = medals[rank-1] if rank <= 3 else str(rank)
-        html += (
-            f'<tr style="background:{bg};border-bottom:1px solid #F3F4F6;">'
-            f'<td style="padding:14px 12px;text-align:center;font-size:14px;">{tag}</td>'
-            f'<td style="padding:14px 20px;font-size:16px;font-weight:700;color:#111827;">{s["name"]}</td>'
+    def render_row(s: dict, rank_tag: str, bg: str, is_trainee: bool = False) -> str:
+        name_style = (
+            "font-size:16px;font-weight:700;color:#94A3B8;"   # 生力軍灰色
+            if is_trainee else
+            "font-size:16px;font-weight:700;color:#111827;"
         )
+        r = (
+            f'<tr style="background:{bg};border-bottom:1px solid #F3F4F6;">'
+            f'<td style="padding:14px 12px;text-align:center;font-size:14px;">{rank_tag}</td>'
+            f'<td style="padding:14px 20px;{name_style}">{s["name"]}'
+        )
+        if is_trainee:
+            r += '<span style="margin-left:8px;font-size:12px;background:#E0F2FE;color:#0369A1;padding:2px 8px;border-radius:10px;font-weight:600;">生力軍</span>'
+        r += '</td>'
+
         for item in ITEMS:
             cnt = s["item_counts"].get(item, 0)
+            cell_bg = "#EEF2FF" if is_trainee and cnt > 0 else ("#D1FAE5" if cnt > 0 else bg)
+            txt_col = "#4F46E5" if is_trainee and cnt > 0 else ("#065F46" if cnt > 0 else "#E5E7EB")
+            bdr     = "#C7D2FE" if is_trainee and cnt > 0 else ("#A7F3D0" if cnt > 0 else "#F3F4F6")
             if cnt > 0:
-                html += (
-                    f'<td style="background:#D1FAE5;padding:12px 14px;text-align:center;'
-                    f'border-left:1px solid #A7F3D0;font-weight:700;color:#065F46;font-size:15px;">'
+                r += (
+                    f'<td style="background:{cell_bg};padding:12px 14px;text-align:center;'
+                    f'border-left:1px solid {bdr};font-weight:700;color:{txt_col};font-size:15px;">'
                     f'{cnt}</td>'
                 )
             else:
-                html += (
+                r += (
                     f'<td style="background:{bg};padding:12px 14px;text-align:center;'
                     f'border-left:1px solid #F3F4F6;color:#E5E7EB;font-size:13px;">-</td>'
                 )
+
         # 替代任務
         alt = s["alt_count"]
         if alt > 0:
-            html += (
+            r += (
                 f'<td style="background:#FEF3C7;padding:12px 14px;text-align:center;'
                 f'border-left:1px solid #FDE68A;font-weight:700;color:#92400E;font-size:15px;">'
                 f'{alt}</td>'
             )
         else:
-            html += (
+            r += (
                 f'<td style="background:{bg};padding:12px 14px;text-align:center;'
                 f'border-left:1px solid #F3F4F6;color:#E5E7EB;font-size:13px;">-</td>'
             )
-        # 總計
-        if s["total"] > 0:
-            html += (
+
+        # 獎金欄
+        if is_trainee:
+            r += (
+                '<td style="padding:14px 20px;text-align:right;">'
+                '<span style="background:#E0F2FE;color:#0369A1;padding:4px 12px;'
+                'border-radius:12px;font-size:13px;font-weight:600;">🌱 練習</span></td>'
+            )
+        elif s["total"] > 0:
+            r += (
                 f'<td style="padding:14px 20px;text-align:right;font-size:18px;'
                 f'font-weight:800;color:#1E3A8A;white-space:nowrap;">${s["total"]:,}</td>'
             )
         else:
-            html += (
-                f'<td style="padding:14px 20px;text-align:right;font-size:14px;'
-                f'color:#D1D5DB;">$0</td>'
-            )
-        html += '</tr>'
+            r += '<td style="padding:14px 20px;text-align:right;font-size:14px;color:#D1D5DB;">$0</td>'
 
-    # 合計列
+        r += '</tr>'
+        return r
+
+    medals = ["🥇","🥈","🥉"]
+    for rank, s in enumerate(paying, 1):
+        bg  = "#FFFFFF" if rank % 2 == 1 else "#FAFAFA"
+        tag = medals[rank-1] if rank <= 3 else str(rank)
+        html += render_row(s, tag, bg, is_trainee=False)
+
+    # 生力軍分隔 + 列
+    if trainees:
+        colspan_total = len(ITEMS) + 3
+        html += (
+            f'<tr><td colspan="{colspan_total}" style="padding:8px 20px;'
+            f'background:#F0F9FF;font-size:12px;font-weight:600;color:#0369A1;'
+            f'letter-spacing:0.06em;border-top:2px solid #BAE6FD;border-bottom:1px solid #BAE6FD;">'
+            f'🌱 生力軍（練習參與，不計入正式發放）</td></tr>'
+        )
+        for s in trainees:
+            html += render_row(s, "🌱", "#F8FAFC", is_trainee=True)
+
+    # 合計列（只含正式選手）
     colspan_mid = len(ITEMS) + 1
     html += (
         f'<tr style="background:#EFF6FF;border-top:2px solid #BFDBFE;">'
         f'<td colspan="2" style="padding:16px 20px;font-size:14px;font-weight:700;'
-        f'color:#1E3A8A;letter-spacing:0.04em;">📋 本月合計發放</td>'
+        f'color:#1E3A8A;letter-spacing:0.04em;">📋 本月正式選手發放合計</td>'
         f'<td colspan="{colspan_mid}" style="padding:16px;"></td>'
         f'<td style="padding:16px 20px;text-align:right;font-size:22px;'
         f'font-weight:900;color:#1E3A8A;white-space:nowrap;">${grand:,}</td>'
@@ -840,40 +879,34 @@ with st.container(border=True):
         for p in players
     ]
 
-    grand_total  = sum(s["total"] for s in monthly_summary)
-    budget_used  = round(grand_total / PROJECT_TOTAL * 100, 1)
-    remaining_bgt = PROJECT_TOTAL - grand_total
+    trainee_set   = set(TRAINEE_PLAYERS)
+    paying_only   = [s for s in monthly_summary if s["name"] not in trainee_set]
+    n_paying      = len(paying_only)
+    n_trainee     = len([s for s in monthly_summary if s["name"] in trainee_set])
+    grand_total   = sum(s["total"] for s in paying_only)
 
-    if budget_used < 50:
-        budget_color = "#059669"
-    elif budget_used < 80:
-        budget_color = "#D97706"
-    else:
-        budget_color = "#DC2626"
-
-    # 月度 KPI 卡片
+    # 月度 KPI 卡片（每人各有 $100,000，不做合計使用率）
     st.markdown(f"""
     <div class="kpi-row">
       <div class="kpi-card">
         <div class="kpi-value">${grand_total:,}</div>
-        <div class="kpi-label">本月已發放獎金（元）</div>
+        <div class="kpi-label">本月正式選手發放合計（元）</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value" style="color:{budget_color};">{budget_used}%</div>
-        <div class="kpi-label">預算使用率（10 萬專案）</div>
-        <div class="prog-wrap">
-          <div class="prog-bar" style="width:{min(budget_used,100)}%;background:{budget_color};"></div>
-        </div>
+        <div class="kpi-value" style="font-size:42px;color:#1E3A8A;">{n_paying} 位</div>
+        <div class="kpi-label">正式選手</div>
+        <div class="kpi-note">各有 $100,000 專案額度</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value">${remaining_bgt:,}</div>
-        <div class="kpi-label">專案剩餘預算（元）</div>
+        <div class="kpi-value" style="font-size:42px;color:#0369A1;">{n_trainee} 位</div>
+        <div class="kpi-label">🌱 生力軍</div>
+        <div class="kpi-note">練習參與，不計入發放</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     # 月度總表
-    st.markdown(render_monthly_table_html(monthly_summary), unsafe_allow_html=True)
+    st.markdown(render_monthly_table_html(monthly_summary, trainee_set), unsafe_allow_html=True)
 
     st.markdown(
         '<div class="legend" style="margin-top:12px;">'
