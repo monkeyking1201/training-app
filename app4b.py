@@ -39,8 +39,9 @@ ITEM_COL_IDX = {
 ALT_COL       = 10
 STATUS_COL    = 11
 WEEKDAY_ZH    = ["一", "二", "三", "四", "五", "六", "日"]
-WEEKLY_TARGET = 4500
-PROJECT_TOTAL = 100_000          # 每位正式選手各有 $100,000 專案額度
+WEEKLY_TARGET  = 4500
+PROJECT_TOTAL  = 100_000         # 每位正式選手各有 $100,000 專案額度
+PROJECT_MONTHS = 5               # 專案期間：8–12 月，共 5 個月
 
 # 生力軍：練習參與打卡系統，不計入實際獎金發放
 TRAINEE_PLAYERS = ["陳天宸", "楊昕潔"]
@@ -912,6 +913,17 @@ with st.container(border=True):
     else:
         comp_color = "#1E3A8A"
 
+    # 本月完成度（月目標 = 總預算 ÷ 專案月數 = 7人×10萬÷5個月 = 14萬）
+    monthly_target   = (n_paying * PROJECT_TOTAL) // PROJECT_MONTHS
+    monthly_comp_pct = round(grand_total / monthly_target * 100, 1) if monthly_target > 0 else 0.0
+
+    if monthly_comp_pct < 70:
+        mo_color = "#DC2626"
+    elif monthly_comp_pct < 90:
+        mo_color = "#D97706"
+    else:
+        mo_color = "#059669"
+
     # 月度 KPI 卡片
     st.markdown(f"""
     <div class="kpi-row">
@@ -920,9 +932,12 @@ with st.container(border=True):
         <div class="kpi-label">本月正式選手發放合計（元）</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value" style="font-size:42px;color:#1E3A8A;">{n_paying} 位</div>
-        <div class="kpi-label">正式選手</div>
-        <div class="kpi-note">各有 $100,000 專案額度</div>
+        <div class="kpi-value" style="color:{mo_color};">{monthly_comp_pct}%</div>
+        <div class="kpi-label">本月完成度</div>
+        <div class="kpi-note">已發 ${grand_total:,}／月目標 ${monthly_target:,}</div>
+        <div class="prog-wrap">
+          <div class="prog-bar" style="width:{min(monthly_comp_pct,100)}%;background:{mo_color};"></div>
+        </div>
       </div>
       <div class="kpi-card">
         <div class="kpi-value" style="color:{comp_color};">{completion_pct}%</div>
