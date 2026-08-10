@@ -157,6 +157,21 @@ def get_month_year(offset: int = 0) -> tuple[int, int]:
     m     = today.month - 1 + offset   # 0-based
     return today.year + m // 12, m % 12 + 1
 
+def calc_total_paid_all(paying_players: list, all_data: list) -> int:
+    """歷史累計已核准獎金（所有正式選手，不限月份）"""
+    names = set(paying_players)
+    total = 0
+    for row in all_data[1:]:
+        if (len(row) > STATUS_COL
+                and row[1] in names
+                and row_status(row) == "已核准"):
+            for item, col in ITEM_COL_IDX.items():
+                if col < len(row) and row[col] == "V":
+                    total += ITEM_PRICES[item]
+            if len(row) > ALT_COL and row[ALT_COL].strip() in ALT_TASK_PRICES:
+                total += ALT_TASK_PRICES[row[ALT_COL].strip()]
+    return total
+
 def calc_monthly_bonus_one(player: str, year: int, month: int, all_data: list) -> dict:
     """計算單一選手某月份的已核准獎金明細"""
     prefix = f"{year:04d}-{month:02d}"
@@ -882,10 +897,22 @@ with st.container(border=True):
     trainee_set   = set(TRAINEE_PLAYERS)
     paying_only   = [s for s in monthly_summary if s["name"] not in trainee_set]
     n_paying      = len(paying_only)
-    n_trainee     = len([s for s in monthly_summary if s["name"] in trainee_set])
     grand_total   = sum(s["total"] for s in paying_only)
 
-    # 月度 KPI 卡片（每人各有 $100,000，不做合計使用率）
+    # 方案整體完成度（歷史累計，不限月份）
+    paying_names   = [p for p in players if p not in trainee_set]
+    total_all_time = calc_total_paid_all(paying_names, all_data)
+    total_budget   = n_paying * PROJECT_TOTAL
+    completion_pct = round(total_all_time / total_budget * 100, 1) if total_budget > 0 else 0.0
+
+    if completion_pct < 40:
+        comp_color = "#059669"
+    elif completion_pct < 70:
+        comp_color = "#D97706"
+    else:
+        comp_color = "#1E3A8A"
+
+    # 月度 KPI 卡片
     st.markdown(f"""
     <div class="kpi-row">
       <div class="kpi-card">
@@ -898,9 +925,12 @@ with st.container(border=True):
         <div class="kpi-note">各有 $100,000 專案額度</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-value" style="font-size:42px;color:#0369A1;">{n_trainee} 位</div>
-        <div class="kpi-label">🌱 生力軍</div>
-        <div class="kpi-note">練習參與，不計入發放</div>
+        <div class="kpi-value" style="color:{comp_color};">{completion_pct}%</div>
+        <div class="kpi-label">方案整體完成度</div>
+        <div class="kpi-note">已累計發出 ${total_all_time:,}／目標 ${total_budget:,}</div>
+        <div class="prog-wrap">
+          <div class="prog-bar" style="width:{min(completion_pct,100)}%;background:{comp_color};"></div>
+        </div>
       </div>
     </div>
     """, unsafe_allow_html=True)
