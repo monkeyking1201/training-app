@@ -148,6 +148,133 @@ def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.Dat
 
     return pd.DataFrame(rows).set_index("日期")
 
+def get_month_year(offset: int = 0) -> tuple[int, int]:
+    """offset=0 本月, offset=-1 上月, ..."""
+    today = date.today()
+    m     = today.month - 1 + offset   # 0-based
+    return today.year + m // 12, m % 12 + 1
+
+def calc_monthly_bonus_one(player: str, year: int, month: int, all_data: list) -> dict:
+    """計算單一選手某月份的已核准獎金明細"""
+    prefix = f"{year:04d}-{month:02d}"
+    total  = 0
+    days   = 0
+    item_counts = {item: 0 for item in ITEM_COL_IDX}
+    alt_count   = 0
+
+    for row in all_data[1:]:
+        if (len(row) > STATUS_COL
+                and row[1] == player
+                and row[2].startswith(prefix)
+                and row_status(row) == "已核准"):
+            days += 1
+            for item, col in ITEM_COL_IDX.items():
+                if col < len(row) and row[col] == "V":
+                    item_counts[item] += 1
+                    total += ITEM_PRICES[item]
+            if len(row) > ALT_COL and row[ALT_COL].strip() in ALT_TASK_PRICES:
+                alt_count += 1
+                total += ALT_TASK_PRICES[row[ALT_COL].strip()]
+    return {"total": total, "days": days, "item_counts": item_counts, "alt_count": alt_count}
+
+def render_monthly_table_html(summary: list) -> str:
+    """summary: list of {name, total, days, item_counts, alt_count}"""
+    summary = sorted(summary, key=lambda x: x["total"], reverse=True)
+    grand   = sum(s["total"] for s in summary)
+    ITEMS   = ["出席率", "死活題", "次一手", "輸棋討論", "AI人機大戰", "新銳循環賽"]
+    EMOJIS  = {"出席率":"📍","死活題":"🧩","次一手":"🎯","輸棋討論":"🗣️","AI人機大戰":"🤖","新銳循環賽":"⚔️"}
+
+    html = (
+        '<div style="overflow-x:auto;border-radius:14px;'
+        'border:1px solid #E5E7EB;box-shadow:0 1px 4px rgba(0,0,0,0.05);">'
+        '<table style="width:100%;border-collapse:collapse;'
+        'font-family:\'Inter\',\'Helvetica Neue\',sans-serif;">'
+    )
+
+    # 表頭
+    html += (
+        '<thead><tr style="background:#F9FAFB;border-bottom:2px solid #E5E7EB;">'
+        '<th style="padding:12px 12px;text-align:center;font-size:12px;color:#9CA3AF;width:40px;">#</th>'
+        '<th style="padding:12px 20px;text-align:left;font-size:13px;font-weight:700;color:#374151;">姓 名</th>'
+    )
+    for item in ITEMS:
+        e = EMOJIS[item]
+        p = ITEM_PRICES[item]
+        html += (
+            f'<th style="padding:10px 14px;text-align:center;vertical-align:middle;">'
+            f'<span style="display:block;font-size:15px;">{e}</span>'
+            f'<span style="font-size:11px;font-weight:400;color:#9CA3AF;">${p}</span></th>'
+        )
+    html += (
+        '<th style="padding:10px 12px;text-align:center;vertical-align:middle;">'
+        '<span style="display:block;font-size:15px;">🔥</span>'
+        '<span style="font-size:11px;font-weight:400;color:#9CA3AF;">$300</span></th>'
+        '<th style="padding:12px 20px;text-align:right;font-size:13px;font-weight:700;color:#374151;white-space:nowrap;">本月獎金</th>'
+        '</tr></thead><tbody>'
+    )
+
+    medals = ["🥇","🥈","🥉"]
+    for rank, s in enumerate(summary, 1):
+        bg  = "#FFFFFF" if rank % 2 == 1 else "#FAFAFA"
+        tag = medals[rank-1] if rank <= 3 else str(rank)
+        html += (
+            f'<tr style="background:{bg};border-bottom:1px solid #F3F4F6;">'
+            f'<td style="padding:14px 12px;text-align:center;font-size:14px;">{tag}</td>'
+            f'<td style="padding:14px 20px;font-size:16px;font-weight:700;color:#111827;">{s["name"]}</td>'
+        )
+        for item in ITEMS:
+            cnt = s["item_counts"].get(item, 0)
+            if cnt > 0:
+                html += (
+                    f'<td style="background:#D1FAE5;padding:12px 14px;text-align:center;'
+                    f'border-left:1px solid #A7F3D0;font-weight:700;color:#065F46;font-size:15px;">'
+                    f'{cnt}</td>'
+                )
+            else:
+                html += (
+                    f'<td style="background:{bg};padding:12px 14px;text-align:center;'
+                    f'border-left:1px solid #F3F4F6;color:#E5E7EB;font-size:13px;">-</td>'
+                )
+        # 替代任務
+        alt = s["alt_count"]
+        if alt > 0:
+            html += (
+                f'<td style="background:#FEF3C7;padding:12px 14px;text-align:center;'
+                f'border-left:1px solid #FDE68A;font-weight:700;color:#92400E;font-size:15px;">'
+                f'{alt}</td>'
+            )
+        else:
+            html += (
+                f'<td style="background:{bg};padding:12px 14px;text-align:center;'
+                f'border-left:1px solid #F3F4F6;color:#E5E7EB;font-size:13px;">-</td>'
+            )
+        # 總計
+        if s["total"] > 0:
+            html += (
+                f'<td style="padding:14px 20px;text-align:right;font-size:18px;'
+                f'font-weight:800;color:#1E3A8A;white-space:nowrap;">${s["total"]:,}</td>'
+            )
+        else:
+            html += (
+                f'<td style="padding:14px 20px;text-align:right;font-size:14px;'
+                f'color:#D1D5DB;">$0</td>'
+            )
+        html += '</tr>'
+
+    # 合計列
+    colspan_mid = len(ITEMS) + 1
+    html += (
+        f'<tr style="background:#EFF6FF;border-top:2px solid #BFDBFE;">'
+        f'<td colspan="2" style="padding:16px 20px;font-size:14px;font-weight:700;'
+        f'color:#1E3A8A;letter-spacing:0.04em;">📋 本月合計發放</td>'
+        f'<td colspan="{colspan_mid}" style="padding:16px;"></td>'
+        f'<td style="padding:16px 20px;text-align:right;font-size:22px;'
+        f'font-weight:900;color:#1E3A8A;white-space:nowrap;">${grand:,}</td>'
+        f'</tr>'
+    )
+    html += '</tbody></table></div>'
+    return html
+
 def calc_bonus(player: str, week_dates: list[date], all_data: list) -> tuple[int, int, int]:
     week_strs     = {d.strftime("%Y-%m-%d") for d in week_dates}
     weekly_earned = 0
@@ -519,6 +646,8 @@ hr { border-color: #F3F4F6 !important; margin: 20px 0 !important; }
 # ── 資料載入 ──────────────────────────────────────────────────────
 if "week_offset" not in st.session_state:
     st.session_state.week_offset = 0
+if "month_offset" not in st.session_state:
+    st.session_state.month_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -671,6 +800,86 @@ with st.container(border=True):
         'margin-right:8px;color:#92400E;">⏳ 待審核</span>'
         '<span style="background:#F9FAFB;padding:2px 10px;border-radius:4px;'
         'border:1px solid #E5E7EB;color:#9CA3AF;">空白 未申報</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════
+# 月度獎金總表
+# ═════════════════════════════════════════════════════════════════
+with st.container(border=True):
+    st.markdown('<div class="sec-label">📅 月度獎金總表</div>', unsafe_allow_html=True)
+
+    mo   = st.session_state.month_offset
+    year, month = get_month_year(mo)
+    month_label = f"{year} 年 {month:02d} 月"
+
+    m_l, m_mid, m_r = st.columns([1, 3, 1])
+    with m_l:
+        if st.button("← 上月", use_container_width=True, key="prev_month"):
+            st.session_state.month_offset -= 1
+            st.rerun()
+    with m_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:16px;font-weight:700;"
+            f"color:#374151;padding:8px 0;'>{month_label}</div>",
+            unsafe_allow_html=True,
+        )
+    with m_r:
+        if st.button("下月 →", use_container_width=True, key="next_month",
+                     disabled=(mo >= 0)):
+            st.session_state.month_offset += 1
+            st.rerun()
+
+    st.write("")
+
+    # 計算所有選手該月獎金
+    monthly_summary = [
+        {"name": p, **calc_monthly_bonus_one(p, year, month, all_data)}
+        for p in players
+    ]
+
+    grand_total  = sum(s["total"] for s in monthly_summary)
+    budget_used  = round(grand_total / PROJECT_TOTAL * 100, 1)
+    remaining_bgt = PROJECT_TOTAL - grand_total
+
+    if budget_used < 50:
+        budget_color = "#059669"
+    elif budget_used < 80:
+        budget_color = "#D97706"
+    else:
+        budget_color = "#DC2626"
+
+    # 月度 KPI 卡片
+    st.markdown(f"""
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-value">${grand_total:,}</div>
+        <div class="kpi-label">本月已發放獎金（元）</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value" style="color:{budget_color};">{budget_used}%</div>
+        <div class="kpi-label">預算使用率（10 萬專案）</div>
+        <div class="prog-wrap">
+          <div class="prog-bar" style="width:{min(budget_used,100)}%;background:{budget_color};"></div>
+        </div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">${remaining_bgt:,}</div>
+        <div class="kpi-label">專案剩餘預算（元）</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 月度總表
+    st.markdown(render_monthly_table_html(monthly_summary), unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="legend" style="margin-top:12px;">'
+        '數字 = 該月已核准次數　'
+        '<span style="background:#D1FAE5;padding:2px 8px;border-radius:4px;color:#065F46;">綠色 已完成</span>　'
+        '<span style="background:#FEF3C7;padding:2px 8px;border-radius:4px;color:#92400E;">橘色 替代任務</span>'
         '</div>',
         unsafe_allow_html=True,
     )
