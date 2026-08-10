@@ -120,19 +120,30 @@ def approve_one(row_idx: int, all_data: list) -> None:
     load_bonus_data.clear()
 
 def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.DataFrame:
-    week_strs  = {d.strftime("%Y-%m-%d") for d in week_dates}
-    lookup     : dict[str, dict]  = {}
-    lookup_alt : dict[str, tuple] = {}
+    week_strs = {d.strftime("%Y-%m-%d") for d in week_dates}
+    # lookup[ds][item] = [approved_count, pending_count]
+    lookup     : dict = {}
+    lookup_alt : dict = {}   # ds -> [alt_name, approved_count, pending_count]
 
     for row in all_data[1:]:
         if len(row) > STATUS_COL and row[1] == player and row[2] in week_strs:
             ds, status = row[2], row_status(row)
-            lookup.setdefault(ds, {})
+            if ds not in lookup:
+                lookup[ds] = {item: [0, 0] for item in ITEM_COL_IDX}
             for item, col in ITEM_COL_IDX.items():
                 if col < len(row) and row[col] == "V":
-                    lookup[ds][item] = status
+                    if status == "已核准":
+                        lookup[ds][item][0] += 1
+                    elif status == "待審核":
+                        lookup[ds][item][1] += 1
             if len(row) > ALT_COL and row[ALT_COL].strip():
-                lookup_alt[ds] = (row[ALT_COL].strip(), status)
+                alt_name = row[ALT_COL].strip()
+                if ds not in lookup_alt:
+                    lookup_alt[ds] = [alt_name, 0, 0]
+                if status == "已核准":
+                    lookup_alt[ds][1] += 1
+                elif status == "待審核":
+                    lookup_alt[ds][2] += 1
 
     rows = []
     for d in week_dates:
@@ -140,12 +151,22 @@ def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.Dat
         label = f"{d.strftime('%m/%d')}（{WEEKDAY_ZH[d.weekday()]}）"
         rd    = {"日期": label}
         for item in ITEM_COL_IDX:
-            s = lookup.get(ds, {}).get(item, "")
-            rd[item] = "✅" if s == "已核准" else ("🟡" if s == "待審核" else "・")
+            a, p = lookup.get(ds, {}).get(item, [0, 0])
+            if a > 0:
+                rd[item] = "✅" if a == 1 else f"✅×{a}"
+            elif p > 0:
+                rd[item] = "🟡" if p == 1 else f"🟡×{p}"
+            else:
+                rd[item] = "・"
         alt = lookup_alt.get(ds)
         if alt:
-            alt_name, alt_status = alt
-            rd["🔥替代"] = f"✅ {alt_name}" if alt_status == "已核准" else f"🟡 {alt_name}"
+            alt_name, a_cnt, p_cnt = alt
+            if a_cnt > 0:
+                rd["🔥替代"] = f"✅ {alt_name}" if a_cnt == 1 else f"✅ {alt_name}×{a_cnt}"
+            elif p_cnt > 0:
+                rd["🔥替代"] = f"🟡 {alt_name}" if p_cnt == 1 else f"🟡 {alt_name}×{p_cnt}"
+            else:
+                rd["🔥替代"] = "・"
         else:
             rd["🔥替代"] = "・"
         rows.append(rd)

@@ -70,20 +70,22 @@ def load_pin_table() -> dict:
     return {str(row[1]).strip(): row[0].strip()
             for row in rows if len(row) >= 2 and row[1].strip()}
 
-def already_submitted_today(name: str) -> tuple:
-    """只在登入後呼叫一次，回傳 (已送出bool, 申報明細dict or None)"""
+def count_submitted_today(name: str) -> tuple:
+    """回傳 (今日已送出筆數, 最近一筆明細dict or None)"""
     ws = get_bonus_ws()
     today_str = date.today().strftime("%Y-%m-%d")
     all_rows = ws.get_all_values()
+    count = 0
+    last_detail = None
     for row in all_rows[1:]:
         if len(row) >= 3 and row[1] == name and row[2] == today_str:
-            # 找審核狀態（容忍多餘欄位）
+            count += 1
             status = ""
             for v in row[11:]:
                 if v.strip() in ("待審核", "已核准"):
                     status = v.strip()
                     break
-            detail = {
+            last_detail = {
                 "出席率":     len(row) > 4  and row[4]  == "V",
                 "死活題":     len(row) > 5  and row[5]  == "V",
                 "次一手":     len(row) > 6  and row[6]  == "V",
@@ -93,8 +95,7 @@ def already_submitted_today(name: str) -> tuple:
                 "替代任務":   row[10].strip() if len(row) > 10 else "",
                 "審核狀態":   status,
             }
-            return True, detail
-    return False, None
+    return count, last_detail
 
 def submit_bonus(name: str, checks: dict, alt_task: str):
     """
@@ -156,12 +157,14 @@ st.markdown("""
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.player_name = ""
-if "submitted" not in st.session_state:
-    st.session_state.submitted = False
-if "already_done" not in st.session_state:
-    st.session_state.already_done = False
 if "done_checked" not in st.session_state:
     st.session_state.done_checked = False
+if "submit_count" not in st.session_state:
+    st.session_state.submit_count = 0       # 從 Sheets 讀到的今日送出筆數
+if "session_submits" not in st.session_state:
+    st.session_state.session_submits = 0    # 本次登入後新增的筆數
+if "adding_more" not in st.session_state:
+    st.session_state.adding_more = False    # 是否正在新增第二筆
 if "today_detail" not in st.session_state:
     st.session_state.today_detail = None
 
@@ -210,16 +213,20 @@ else:
 
     # 已送出判斷（只在登入後執行一次，避免重複打 API）
     if not st.session_state.done_checked:
-        done, detail = already_submitted_today(name)
-        st.session_state.already_done = done
+        count, detail = count_submitted_today(name)
+        st.session_state.submit_count = count
         st.session_state.today_detail = detail
         st.session_state.done_checked = True
 
-    if st.session_state.already_done or st.session_state.submitted:
+    total_today = st.session_state.submit_count + st.session_state.session_submits
+
+    if total_today > 0 and not st.session_state.adding_more:
         detail = st.session_state.today_detail
 
         # ── 審核狀態 banner ──────────────────────────────────────
-        if detail and detail["審核狀態"] == "已核准":
+        if total_today > 1:
+            st.info(f"📋 今日已申報 {total_today} 筆（最近一筆如下）")
+        elif detail and detail["審核狀態"] == "已核准":
             st.success("🎉 今日申報已核准！獎金入袋！")
         else:
             st.success("✅ 今日申報完成，等待教練審核！")
@@ -273,16 +280,22 @@ else:
             </div>
             """, unsafe_allow_html=True)
 
-        st.caption("明天訓練結束後再回來申報。")
         st.write("")
-        if st.button("登出", use_container_width=True):
-            st.session_state.authenticated = False
-            st.session_state.player_name = ""
-            st.session_state.submitted = False
-            st.session_state.already_done = False
-            st.session_state.done_checked = False
-            st.session_state.today_detail = None
-            st.rerun()
+        col_add, col_out = st.columns(2)
+        with col_add:
+            if st.button("➕ 新增一筆申報", type="primary", use_container_width=True):
+                st.session_state.adding_more = True
+                st.rerun()
+        with col_out:
+            if st.button("登出", use_container_width=True):
+                st.session_state.authenticated  = False
+                st.session_state.player_name    = ""
+                st.session_state.done_checked   = False
+                st.session_state.submit_count   = 0
+                st.session_state.session_submits = 0
+                st.session_state.adding_more    = False
+                st.session_state.today_detail   = None
+                st.rerun()
         st.stop()
 
     checks = {}
@@ -316,6 +329,10 @@ else:
 
     st.divider()
 
+    if st.session_state.adding_more:
+        n = st.session_state.submit_count + st.session_state.session_submits + 1
+        st.info(f"➕ 新增第 {n} 筆申報")
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("📤 送出申請", type="primary", use_container_width=True):
@@ -324,7 +341,8 @@ else:
             else:
                 with st.spinner("送出中..."):
                     submit_bonus(name, checks, alt_task)
-                st.session_state.submitted = True
+                st.session_state.session_submits += 1
+                st.session_state.adding_more = False
                 st.session_state.today_detail = {
                     "出席率":     checks.get("出席率",     False),
                     "死活題":     checks.get("死活題",     False),
@@ -339,6 +357,11 @@ else:
                 st.rerun()
     with col2:
         if st.button("登出", use_container_width=True):
-            st.session_state.authenticated = False
-            st.session_state.player_name = ""
+            st.session_state.authenticated  = False
+            st.session_state.player_name    = ""
+            st.session_state.done_checked   = False
+            st.session_state.submit_count   = 0
+            st.session_state.session_submits = 0
+            st.session_state.adding_more    = False
+            st.session_state.today_detail   = None
             st.rerun()
