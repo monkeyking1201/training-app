@@ -82,9 +82,10 @@ def load_player_list() -> list:
 
 
 # ── 工具函數 ──────────────────────────────────────────────────────
-def get_week_dates() -> list[date]:
+def get_week_dates(offset: int = 0) -> list[date]:
+    """offset=0 本週, offset=-1 上週, offset=-2 兩週前, ..."""
     today  = date.today()
-    monday = today - timedelta(days=today.weekday())
+    monday = today - timedelta(days=today.weekday()) + timedelta(weeks=offset)
     return [monday + timedelta(days=i) for i in range(7)]
 
 def get_pending_today(all_data: list) -> list[tuple]:
@@ -516,8 +517,11 @@ hr { border-color: #F3F4F6 !important; margin: 20px 0 !important; }
 
 
 # ── 資料載入 ──────────────────────────────────────────────────────
+if "week_offset" not in st.session_state:
+    st.session_state.week_offset = 0
+
 all_data   = load_bonus_data()
-week_dates = get_week_dates()
+week_dates = get_week_dates(st.session_state.week_offset)
 players    = load_player_list()
 
 # ── 頁首 ─────────────────────────────────────────────────────────
@@ -581,17 +585,39 @@ if not players:
     st.stop()
 
 with st.container(border=True):
-    st.markdown('<div class="sec-label">📊 本週任務熱圖矩陣</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">📊 任務熱圖矩陣</div>', unsafe_allow_html=True)
 
     # 選手下拉
     selected = st.selectbox("選擇選手", players, label_visibility="collapsed")
 
-    # 大名字（純黑 60px，無陰影）
-    st.markdown(f'<div class="big-name">{selected}</div>', unsafe_allow_html=True)
+    # ── 週切換導航 ───────────────────────────────────────────────
     week_start = week_dates[0].strftime("%m/%d")
     week_end   = week_dates[6].strftime("%m/%d")
+    offset     = st.session_state.week_offset
+    week_label = "本週" if offset == 0 else (f"上週" if offset == -1 else f"{abs(offset)} 週前")
+
+    nav_l, nav_mid, nav_r = st.columns([1, 3, 1])
+    with nav_l:
+        if st.button("← 上週", use_container_width=True):
+            st.session_state.week_offset -= 1
+            st.rerun()
+    with nav_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:15px;font-weight:600;"
+            f"color:#374151;padding:8px 0;'>"
+            f"{week_label}　{week_start} － {week_end}</div>",
+            unsafe_allow_html=True,
+        )
+    with nav_r:
+        if st.button("下週 →", use_container_width=True,
+                     disabled=(offset >= 0)):
+            st.session_state.week_offset += 1
+            st.rerun()
+
+    # 大名字
+    st.markdown(f'<div class="big-name">{selected}</div>', unsafe_allow_html=True)
     st.markdown(
-        f'<div class="week-label">本週　{week_start} － {week_end}</div>',
+        f'<div class="week-label">{week_start} － {week_end}</div>',
         unsafe_allow_html=True,
     )
 
