@@ -8,7 +8,7 @@ App 4A — 訓練獎金申報端（選手專用）
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 # ── 常數設定 ────────────────────────────────────────────────────
 SCOPES = [
@@ -38,6 +38,21 @@ ALT_TASK_OPTIONS = {
     "🤝 交流":            "交流",
     "📚 讀書會":          "讀書會",
 }
+
+# 週進度卡用：簡短標籤、項目金額
+ITEM_SHORT = {
+    "出席率":     "📍出席",
+    "死活題":     "🧩死活",
+    "次一手":     "🎯次一手",
+    "輸棋討論":   "🗣️輸棋",
+    "AI人機大戰": "🤖AI",
+    "新銳循環賽": "⚔️新銳",
+}
+ITEM_PRICES_4A = {
+    "出席率": 200, "死活題": 300, "次一手": 400,
+    "輸棋討論": 400, "AI人機大戰": 400, "新銳循環賽": 600,
+}
+ALT_PRICES_4A = {"運動": 300, "交流": 300, "讀書會": 300}
 
 HEADER_ROW = [
     "時間戳", "姓名", "日期", "星期",
@@ -70,21 +85,39 @@ def load_pin_table() -> dict:
     return {str(row[1]).strip(): row[0].strip()
             for row in rows if len(row) >= 2 and row[1].strip()}
 
-def count_submitted_today(name: str) -> tuple:
-    """回傳 (今日已送出筆數, 最近一筆明細dict or None)"""
+def get_today_and_week_data(name: str) -> tuple:
+    """一次 API，回傳 (今日筆數, 最近一筆明細, 本週週報)
+    週報格式：{ds: {item: (approved, pending), "替代任務": str}}
+    """
     ws = get_bonus_ws()
-    today_str = date.today().strftime("%Y-%m-%d")
-    all_rows = ws.get_all_values()
-    count = 0
+    today = date.today()
+    today_str = today.strftime("%Y-%m-%d")
+    monday    = today - timedelta(days=today.weekday())
+    week_strs = {(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)}
+
+    all_rows    = ws.get_all_values()
+    count       = 0
     last_detail = None
+    week_data   = {}   # ds -> {item: [approved, pending], "替代任務": str}
+
+    ITEM_COLS = {
+        "出席率": 4, "死活題": 5, "次一手": 6,
+        "輸棋討論": 7, "AI人機大戰": 8, "新銳循環賽": 9,
+    }
+
     for row in all_rows[1:]:
-        if len(row) >= 3 and row[1] == name and row[2] == today_str:
+        if len(row) < 3 or row[1] != name:
+            continue
+        ds = row[2]
+        status = ""
+        for v in row[11:]:
+            if v.strip() in ("待審核", "已核准"):
+                status = v.strip()
+                break
+
+        # 今日統計
+        if ds == today_str:
             count += 1
-            status = ""
-            for v in row[11:]:
-                if v.strip() in ("待審核", "已核准"):
-                    status = v.strip()
-                    break
             last_detail = {
                 "出席率":     len(row) > 4  and row[4]  == "V",
                 "死活題":     len(row) > 5  and row[5]  == "V",
@@ -95,7 +128,110 @@ def count_submitted_today(name: str) -> tuple:
                 "替代任務":   row[10].strip() if len(row) > 10 else "",
                 "審核狀態":   status,
             }
-    return count, last_detail
+
+        # 本週彙整
+        if ds in week_strs and status in ("已核准", "待審核"):
+            if ds not in week_data:
+                week_data[ds] = {item: [0, 0] for item in ITEM_COLS}
+            for item, col in ITEM_COLS.items():
+                if col < len(row) and row[col] == "V":
+                    if status == "已核准":
+                        week_data[ds][item][0] += 1
+                    else:
+                        week_data[ds][item][1] += 1
+            if len(row) > 10 and row[10].strip():
+                week_data[ds]["替代任務"] = row[10].strip()
+
+    return count, last_detail, week_data
+
+def render_week_summary_html(week_data: dict, today: date) -> str:
+    """選手端本週進度卡 HTML"""
+    monday     = today - timedelta(days=today.weekday())
+    week_start = monday.strftime("%m/%d")
+    week_end   = (monday + timedelta(days=6)).strftime("%m/%d")
+    WD         = ["一", "二", "三", "四", "五", "六", "日"]
+    ITEMS      = ["出席率", "死活題", "次一手", "輸棋討論", "AI人機大戰", "新銳循環賽"]
+
+    total_approved = 0
+    rows_html      = ""
+
+    for i in range(7):
+        d  = monday + timedelta(days=i)
+        ds = d.strftime("%Y-%m-%d")
+        label = f"{d.strftime('%m/%d')}（{WD[i]}）"
+
+        if d > today:
+            continue
+
+        if ds not in week_data:
+            rows_html += (
+                f"<div style='padding:7px 0;border-bottom:1px solid #F9FAFB;'>"
+                f"<span style='font-size:13px;color:#D1D5DB;font-weight:500;"
+                f"display:inline-block;width:90px;'>{label}</span>"
+                f"<span style='font-size:12px;color:#E5E7EB;'>（未申報）</span></div>"
+            )
+            continue
+
+        row_d  = week_data[ds]
+        badges = ""
+        for item in ITEMS:
+            a, p = row_d.get(item, [0, 0])
+            if a > 0:
+                lbl = ITEM_SHORT[item]
+                sfx = f"×{a}" if a > 1 else ""
+                total_approved += a
+                badges += (
+                    f"<span style='background:#D1FAE5;color:#065F46;padding:3px 9px;"
+                    f"border-radius:20px;font-size:12px;font-weight:600;"
+                    f"margin-right:5px;white-space:nowrap;'>{lbl}{sfx}</span>"
+                )
+            elif p > 0:
+                lbl = ITEM_SHORT[item]
+                badges += (
+                    f"<span style='background:#FEF3C7;color:#92400E;padding:3px 9px;"
+                    f"border-radius:20px;font-size:12px;font-weight:600;"
+                    f"margin-right:5px;white-space:nowrap;'>⏳{lbl}</span>"
+                )
+        alt = row_d.get("替代任務", "")
+        if alt:
+            total_approved += 1
+            badges += (
+                f"<span style='background:#FEF3C7;color:#92400E;padding:3px 9px;"
+                f"border-radius:20px;font-size:12px;font-weight:600;"
+                f"margin-right:5px;white-space:nowrap;'>🔥{alt}</span>"
+            )
+        if not badges:
+            badges = "<span style='font-size:12px;color:#D1D5DB;'>（待審核中）</span>"
+
+        rows_html += (
+            f"<div style='padding:8px 0;border-bottom:1px solid #F9FAFB;'>"
+            f"<span style='font-size:13px;font-weight:600;color:#374151;"
+            f"display:inline-block;width:90px;min-width:90px;'>{label}</span>"
+            f"{badges}</div>"
+        )
+
+    if not rows_html:
+        rows_html = "<div style='color:#9CA3AF;font-size:14px;padding:8px 0;'>本週尚無申報記錄</div>"
+
+    return f"""
+    <div style='background:#fff;border:1px solid #E5E7EB;border-radius:14px;
+                padding:20px 24px;margin:16px 0 8px 0;
+                box-shadow:0 2px 8px rgba(0,0,0,0.05);'>
+        <div style='font-size:11px;color:#9CA3AF;font-weight:700;
+                    letter-spacing:0.1em;text-transform:uppercase;margin-bottom:14px;'>
+            📅 本週訓練進度　{week_start} － {week_end}
+        </div>
+        {rows_html}
+        <div style='margin-top:14px;border-top:1px solid #F3F4F6;padding-top:12px;'>
+            <span style='font-size:15px;font-weight:700;color:#1E3A8A;'>
+                ✅ 本週已核准 {total_approved} 項
+            </span>
+            <span style='font-size:12px;color:#9CA3AF;margin-left:10px;'>
+                ✅綠色=已核准　⏳黃色=待審核
+            </span>
+        </div>
+    </div>
+    """
 
 def submit_bonus(name: str, checks: dict, alt_task: str):
     """
@@ -167,6 +303,8 @@ if "adding_more" not in st.session_state:
     st.session_state.adding_more = False    # 是否正在新增第二筆
 if "today_detail" not in st.session_state:
     st.session_state.today_detail = None
+if "week_summary" not in st.session_state:
+    st.session_state.week_summary = {}
 
 # ══════════════════════════════════════════════════════════════════
 # 畫面 A：登入
@@ -213,10 +351,17 @@ else:
 
     # 已送出判斷（只在登入後執行一次，避免重複打 API）
     if not st.session_state.done_checked:
-        count, detail = count_submitted_today(name)
-        st.session_state.submit_count = count
-        st.session_state.today_detail = detail
-        st.session_state.done_checked = True
+        count, detail, week_data = get_today_and_week_data(name)
+        st.session_state.submit_count  = count
+        st.session_state.today_detail  = detail
+        st.session_state.week_summary  = week_data
+        st.session_state.done_checked  = True
+
+    # ── 本週進度卡（常駐顯示）────────────────────────────────────
+    st.markdown(
+        render_week_summary_html(st.session_state.week_summary, today),
+        unsafe_allow_html=True,
+    )
 
     total_today = st.session_state.submit_count + st.session_state.session_submits
 
@@ -288,13 +433,14 @@ else:
                 st.rerun()
         with col_out:
             if st.button("登出", use_container_width=True):
-                st.session_state.authenticated  = False
-                st.session_state.player_name    = ""
-                st.session_state.done_checked   = False
-                st.session_state.submit_count   = 0
+                st.session_state.authenticated   = False
+                st.session_state.player_name     = ""
+                st.session_state.done_checked    = False
+                st.session_state.submit_count    = 0
                 st.session_state.session_submits = 0
-                st.session_state.adding_more    = False
-                st.session_state.today_detail   = None
+                st.session_state.adding_more     = False
+                st.session_state.today_detail    = None
+                st.session_state.week_summary    = {}
                 st.rerun()
         st.stop()
 
@@ -357,11 +503,12 @@ else:
                 st.rerun()
     with col2:
         if st.button("登出", use_container_width=True):
-            st.session_state.authenticated  = False
-            st.session_state.player_name    = ""
-            st.session_state.done_checked   = False
-            st.session_state.submit_count   = 0
+            st.session_state.authenticated   = False
+            st.session_state.player_name     = ""
+            st.session_state.done_checked    = False
+            st.session_state.submit_count    = 0
             st.session_state.session_submits = 0
-            st.session_state.adding_more    = False
-            st.session_state.today_detail   = None
+            st.session_state.adding_more     = False
+            st.session_state.today_detail    = None
+            st.session_state.week_summary    = {}
             st.rerun()
