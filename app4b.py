@@ -100,6 +100,17 @@ def get_pending_today(all_data: list) -> list[tuple]:
         if len(row) > STATUS_COL and row[2] == today_str and row_status(row) == "待審核"
     ]
 
+def get_pending_makeup(all_data: list) -> list[tuple]:
+    """取得非今日的待審核補交申報 → (row_idx_1based, player_name, date_str)"""
+    today_str = date.today().strftime("%Y-%m-%d")
+    return [
+        (i + 2, row[1], row[2])
+        for i, row in enumerate(all_data[1:])
+        if len(row) > STATUS_COL
+        and row[2] != today_str
+        and row_status(row) == "待審核"
+    ]
+
 def approve_all_pending(all_data: list) -> int:
     today_str = date.today().strftime("%Y-%m-%d")
     cells = [
@@ -476,6 +487,177 @@ def render_heatmap_html(df: pd.DataFrame) -> str:
     return html
 
 
+# ── 週報告 HTML 生成 ─────────────────────────────────────────────
+def generate_weekly_report_html(players_list: list, wd: list[date], all_data: list) -> str:
+    trainee_set = set(TRAINEE_PLAYERS)
+    week_start  = wd[0].strftime("%Y年%m月%d日")
+    week_end    = wd[6].strftime("%m月%d日")
+    today_str   = date.today().strftime("%Y/%m/%d")
+
+    rows_html = ""
+    for player in players_list:
+        if player in trainee_set:
+            continue
+        weekly, achievement, total = calc_bonus(player, wd, all_data)
+        if achievement >= 100:
+            color, icon, note = "#059669", "✅", "達標"
+        elif achievement >= 70:
+            color, icon, note = "#D97706", "⚡", "需加速"
+        else:
+            color, icon, note = "#DC2626", "⚠️", "落後"
+        rows_html += (
+            f"<tr>"
+            f"<td style='padding:10px 16px;font-size:15px;font-weight:700;'>{player}</td>"
+            f"<td style='padding:10px 16px;text-align:right;'>${weekly:,}</td>"
+            f"<td style='padding:10px 16px;text-align:center;color:{color};font-weight:700;'>{achievement}%</td>"
+            f"<td style='padding:10px 16px;text-align:center;'>{icon} {note}</td>"
+            f"<td style='padding:10px 16px;text-align:right;color:#6B7280;'>${total:,}</td>"
+            f"</tr>"
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<title>新銳隊 週報告 {week_start}</title>
+<style>
+@page {{ margin: 20mm; }}
+body {{ font-family: 'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;
+       background: white; color: #111827; }}
+h1 {{ font-size: 22px; font-weight: 800; margin-bottom: 4px; }}
+.subtitle {{ color: #6B7280; font-size: 14px; margin-bottom: 24px; }}
+table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+th {{ background: #F3F4F6; padding: 10px 16px; font-size: 12px; font-weight: 700;
+      color: #6B7280; text-align: left; border-bottom: 2px solid #E5E7EB; }}
+tr:nth-child(even) {{ background: #F9FAFB; }}
+td {{ border-bottom: 1px solid #E5E7EB; }}
+.footer {{ margin-top: 24px; font-size: 12px; color: #9CA3AF; }}
+</style>
+</head>
+<body>
+<h1>新銳隊 週訓練報告</h1>
+<div class="subtitle">
+  {week_start} ～ {week_end} &nbsp;·&nbsp;
+  週目標 ${WEEKLY_TARGET:,}／人
+</div>
+<table>
+<thead><tr>
+  <th>選手</th>
+  <th style="text-align:right">本週獎金</th>
+  <th style="text-align:center">達成率</th>
+  <th style="text-align:center">狀態</th>
+  <th style="text-align:right">累計獎金</th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+<div class="footer">
+  ※ 以上數據僅含教練已核准項目 &nbsp;·&nbsp; 產出日期：{today_str}
+</div>
+</body>
+</html>"""
+
+
+# ── 月度財務 HTML 生成 ────────────────────────────────────────────
+def generate_monthly_finance_html(players_list: list, year: int, month: int, all_data: list) -> str:
+    trainee_set    = set(TRAINEE_PLAYERS)
+    formal_players = [p for p in players_list if p not in trainee_set]
+    today_str      = date.today().strftime("%Y/%m/%d")
+    ITEMS = ["出席率", "死活題", "次一手", "輸棋討論", "AI人機大戰", "新銳循環賽"]
+
+    rows_data = sorted(
+        [{"name": p, **calc_monthly_bonus_one(p, year, month, all_data)} for p in formal_players],
+        key=lambda x: x["total"], reverse=True,
+    )
+    grand_total = sum(r["total"] for r in rows_data)
+
+    rows_html = ""
+    for r in rows_data:
+        cells = ""
+        for item in ITEMS:
+            cnt    = r["item_counts"].get(item, 0)
+            amount = cnt * ITEM_PRICES[item]
+            if cnt > 0:
+                cells += (
+                    f"<td style='text-align:center;background:#F0FDF4;'>"
+                    f"{cnt}次<br><small style='color:#065F46;'>${amount:,}</small></td>"
+                )
+            else:
+                cells += "<td style='text-align:center;color:#D1D5DB;'>-</td>"
+        alt = r["alt_count"]
+        if alt > 0:
+            cells += (
+                f"<td style='text-align:center;background:#FFFBEB;'>"
+                f"{alt}次<br><small style='color:#92400E;'>${alt*300:,}</small></td>"
+            )
+        else:
+            cells += "<td style='text-align:center;color:#D1D5DB;'>-</td>"
+        rows_html += (
+            f"<tr><td style='padding:10px 16px;font-weight:700;'>{r['name']}</td>"
+            f"{cells}"
+            f"<td style='padding:10px 16px;text-align:right;font-weight:800;"
+            f"color:#1E3A8A;white-space:nowrap;'>${r['total']:,}</td></tr>"
+        )
+
+    # 合計列
+    rows_html += (
+        f"<tr style='background:#EFF6FF;'>"
+        f"<td style='padding:10px 16px;font-weight:700;'>合計發放</td>"
+        f"<td colspan='{len(ITEMS)+1}'></td>"
+        f"<td style='padding:10px 16px;text-align:right;font-size:17px;"
+        f"font-weight:900;color:#1E3A8A;white-space:nowrap;'>${grand_total:,}</td></tr>"
+    )
+
+    item_headers = ""
+    for item in ITEMS:
+        item_headers += (
+            f"<th style='text-align:center;'>{item}<br>"
+            f"<small style='color:#BAE6FD;'>${ITEM_PRICES[item]}/次</small></th>"
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<title>新銳隊 {year}年{month:02d}月 訓練獎金發放明細</title>
+<style>
+@page {{ margin: 15mm; size: A4 landscape; }}
+body {{ font-family: 'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;
+       background: white; color: #111827; font-size: 13px; }}
+h1 {{ font-size: 18px; font-weight: 800; margin-bottom: 4px; }}
+.subtitle {{ color: #6B7280; font-size: 12px; margin-bottom: 20px; }}
+table {{ width: 100%; border-collapse: collapse; }}
+th {{ background: #1E3A8A; color: white; padding: 8px 12px; font-size: 11px;
+      font-weight: 700; text-align: center; }}
+tr:nth-child(even) {{ background: #F9FAFB; }}
+td {{ border: 1px solid #E5E7EB; font-size: 12px; }}
+.footer {{ margin-top: 20px; font-size: 11px; color: #9CA3AF; }}
+small {{ font-size: 10px; display: block; }}
+</style>
+</head>
+<body>
+<h1>新銳隊 訓練獎金發放明細</h1>
+<div class="subtitle">
+  {year}年{month:02d}月 &nbsp;·&nbsp; 正式選手 {len(formal_players)} 位 &nbsp;·&nbsp;
+  各有 $100,000 專案額度
+</div>
+<table>
+<thead><tr>
+  <th style="text-align:left;min-width:80px;">姓名</th>
+  {item_headers}
+  <th style="text-align:center;">🔥替代任務<br>
+    <small style="color:#BAE6FD;">$300/次</small></th>
+  <th style="text-align:right;min-width:80px;">本月獎金</th>
+</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+<div class="footer">
+  ※ 僅含教練已核准項目 &nbsp;·&nbsp; 產出日期：{today_str} &nbsp;·&nbsp;
+  生力軍（{"、".join(TRAINEE_PLAYERS)}）不計入發放
+</div>
+</body>
+</html>"""
+
+
 # ═════════════════════════════════════════════════════════════════
 # 頁面設定
 # ═════════════════════════════════════════════════════════════════
@@ -781,6 +963,30 @@ with st.container(border=True):
             st.success(f"已核准 {count} 筆！綠格立即更新。")
             st.rerun()
 
+    # ── 補交待審核 ───────────────────────────────────────────────
+    makeup_pending = get_pending_makeup(all_data)
+    if makeup_pending:
+        st.divider()
+        st.markdown(
+            '<div class="sec-label" style="margin-top:4px;">📬 補交待審核</div>',
+            unsafe_allow_html=True,
+        )
+        for row_idx, pname, sub_date in makeup_pending:
+            col_info, col_btn = st.columns([5, 1])
+            with col_info:
+                st.markdown(
+                    f'<div style="padding:8px 0;">'
+                    f'<span class="pending-badge">📬 {pname}</span>'
+                    f'<span style="font-size:12px;color:#9CA3AF;margin-left:10px;">'
+                    f'補交日期：{sub_date}</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with col_btn:
+                if st.button("✅ 核准", key=f"makeup_{row_idx}"):
+                    with st.spinner(f"核准中..."):
+                        approve_one(row_idx, all_data)
+                    st.rerun()
+
 
 # ═════════════════════════════════════════════════════════════════
 # 下半：院長熱圖矩陣
@@ -982,6 +1188,41 @@ with st.container(border=True):
         '</div>',
         unsafe_allow_html=True,
     )
+
+
+# ═════════════════════════════════════════════════════════════════
+# 報告下載區
+# ═════════════════════════════════════════════════════════════════
+with st.container(border=True):
+    st.markdown('<div class="sec-label">📄 報告下載</div>', unsafe_allow_html=True)
+    st.write("")
+    btn_week, btn_month = st.columns(2)
+
+    with btn_week:
+        week_html = generate_weekly_report_html(players, week_dates, all_data)
+        fname_week = f"新銳隊_週報告_{week_dates[0].strftime('%Y%m%d')}.html"
+        st.download_button(
+            label="📊 生成本週訓練報告",
+            data=week_html.encode("utf-8"),
+            file_name=fname_week,
+            mime="text/html",
+            use_container_width=True,
+        )
+        st.caption("下載後用瀏覽器開啟 → Ctrl+P（或 ⌘P）→ 另存為 PDF")
+
+    with btn_month:
+        mo_now = st.session_state.month_offset
+        yr_now, mo_num = get_month_year(mo_now)
+        month_html = generate_monthly_finance_html(players, yr_now, mo_num, all_data)
+        fname_month = f"新銳隊_獎金明細_{yr_now}{mo_num:02d}.html"
+        st.download_button(
+            label=f"💰 生成 {yr_now}年{mo_num:02d}月 財務明細",
+            data=month_html.encode("utf-8"),
+            file_name=fname_month,
+            mime="text/html",
+            use_container_width=True,
+        )
+        st.caption("橫式 A4，含明細 · 項目 · 金額，可交財務")
 
 
 # ── 手動刷新 ─────────────────────────────────────────────────────

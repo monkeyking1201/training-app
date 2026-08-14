@@ -233,18 +233,54 @@ def render_week_summary_html(week_data: dict, today: date) -> str:
     </div>
     """
 
-def submit_bonus(name: str, checks: dict, alt_task: str):
+def _show_makeup_form(name: str, prefix: str):
+    """補交申報區塊（不含出席率，供兩個畫面共用）"""
+    st.caption("補交之前未完成的任務，教練審核後計入獎金。出席率不可補交。")
+    mu_date = st.date_input(
+        "補交日期",
+        value=date.today() - timedelta(days=1),
+        max_value=date.today() - timedelta(days=1),
+        min_value=date(2026, 8, 1),
+        key=f"{prefix}_mu_date",
+    )
+    st.markdown("**選擇補交項目**")
+    mu_checks = {
+        "死活題":     st.checkbox(DISPLAY_MAP["死活題"],     key=f"{prefix}_mu_死活題"),
+        "次一手":     st.checkbox(DISPLAY_MAP["次一手"],     key=f"{prefix}_mu_次一手"),
+        "輸棋討論":   st.checkbox(DISPLAY_MAP["輸棋討論"],   key=f"{prefix}_mu_輸棋討論"),
+        "AI人機大戰": st.checkbox(DISPLAY_MAP["AI人機大戰"], key=f"{prefix}_mu_AI"),
+        "新銳循環賽": st.checkbox(DISPLAY_MAP["新銳循環賽"], key=f"{prefix}_mu_新銳"),
+    }
+    mu_alt_label = st.selectbox(
+        "替代任務",
+        options=list(ALT_TASK_OPTIONS.keys()),
+        label_visibility="collapsed",
+        key=f"{prefix}_mu_alt",
+    )
+    mu_alt = ALT_TASK_OPTIONS[mu_alt_label]
+    if st.button("📤 送出補交申請", key=f"{prefix}_mu_btn", use_container_width=True):
+        if not any(mu_checks.values()) and not mu_alt:
+            st.warning("請至少勾選一個項目")
+        else:
+            with st.spinner("送出中..."):
+                submit_bonus(name, mu_checks, mu_alt, submit_date=mu_date)
+            st.success(f"✅ 已送出 {mu_date.strftime('%m/%d')} 補交申請，等待教練審核")
+            st.rerun()
+
+def submit_bonus(name: str, checks: dict, alt_task: str, submit_date: date = None):
     """
     checks: 六個主項目的勾選狀態
-    alt_task: 替代任務對應的原任務名稱，例如 "次一手"，無則空字串
+    alt_task: 替代任務
+    submit_date: 補交日期（None = 今日）
     """
     ws = get_bonus_ws()
     now = datetime.now()
-    weekday = WEEKDAY_MAP[now.weekday()]
+    target_date = submit_date if submit_date is not None else date.today()
+    weekday = WEEKDAY_MAP[target_date.weekday()]
     row = [
         now.strftime("%Y-%m-%d %H:%M:%S"),
         name,
-        now.strftime("%Y-%m-%d"),
+        target_date.strftime("%Y-%m-%d"),
         f"星期{weekday}",
         "V" if checks.get("出席率")     else "",
         "V" if checks.get("死活題")     else "",
@@ -442,6 +478,10 @@ else:
                 st.session_state.today_detail    = None
                 st.session_state.week_summary    = {}
                 st.rerun()
+
+        st.divider()
+        with st.expander("📬 補交過去項目（不含出席率）"):
+            _show_makeup_form(name, prefix="done")
         st.stop()
 
     checks = {}
@@ -512,3 +552,7 @@ else:
             st.session_state.today_detail    = None
             st.session_state.week_summary    = {}
             st.rerun()
+
+    st.divider()
+    with st.expander("📬 補交過去項目（不含出席率）"):
+        _show_makeup_form(name, prefix="form")
