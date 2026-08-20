@@ -60,6 +60,12 @@ CHAMPION_STATUS_BG = {
 }
 CHAMP_COL = {"時間戳":0,"日期":1,"比賽項目":2,"選手":3,"金額":4,"狀態":5,"備注":6}
 
+# 只參加次一手比賽、不在訓練打卡系統的選手
+NEXTMOVE_PLAYERS = [
+    "許皓鈞", "陳祈睿", "徐靖恩", "林君諺", "李維",
+    "賴均輔", "王元均", "簡靖庭", "盧奕銓",
+]
+
 
 # ── 狀態欄位 helpers（容忍多餘欄位）─────────────────────────────
 def row_status(row: list) -> str:
@@ -1312,7 +1318,8 @@ with st.container(border=True):
             item_amount = CHAMPION_ITEMS[item_label]
             st.caption(f"金額：**${item_amount}**")
         with ci2:
-            ci_player = st.selectbox("獲獎選手", players, key="ci_player")
+            all_champ_players = sorted(set(players) | set(NEXTMOVE_PLAYERS))
+            ci_player = st.selectbox("獲獎選手", all_champ_players, key="ci_player")
         ci3, ci4 = st.columns(2)
         with ci3:
             ci_date   = st.date_input("比賽日期", value=date.today(), key="ci_date")
