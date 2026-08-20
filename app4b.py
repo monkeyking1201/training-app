@@ -66,6 +66,15 @@ NEXTMOVE_PLAYERS = [
     "賴均輔", "王元均", "簡靖庭", "盧奕銓",
 ]
 
+# ── 菁英隊 ────────────────────────────────────────────────────────
+ELITE_TAB         = "Elite_DB"
+ELITE_DAILY_BONUS = 4000
+# ★ 填入菁英隊選手名單
+ELITE_PLAYERS = [
+    # "選手A", "選手B", ...（待填入）
+]
+ELITE_COL = {"時間戳":0,"日期":1,"選手":2,"金額":3,"備注":4}
+
 
 # ── 狀態欄位 helpers（容忍多餘欄位）─────────────────────────────
 def row_status(row: list) -> str:
@@ -596,6 +605,147 @@ def render_heatmap_html(df: pd.DataFrame) -> str:
 
     html += "</tbody></table></div>"
     return html
+
+
+# ── 菁英隊 Google Sheet 連線與資料函式 ───────────────────────────
+@st.cache_resource
+def get_elite_ws():
+    sh = get_gc().open_by_key(BONUS_DB_ID)
+    try:
+        ws = sh.worksheet(ELITE_TAB)
+    except Exception:
+        ws = sh.add_worksheet(title=ELITE_TAB, rows=500, cols=8)
+        ws.append_row(list(ELITE_COL.keys()))
+    return ws
+
+@st.cache_data(ttl=30)
+def load_elite_data() -> list:
+    return get_elite_ws().get_all_values()
+
+def record_elite_attendance(rec_date: date, attending: list[str], note: str = "") -> int:
+    """記錄當日出席名單，跳過已存在的 player+date 組合，回傳新增筆數"""
+    from datetime import datetime
+    existing = load_elite_data()
+    date_str = rec_date.strftime("%Y-%m-%d")
+    already  = {row[2] for row in existing[1:] if len(row) > 2 and row[1] == date_str}
+    ws       = get_elite_ws()
+    now_str  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    new_rows = [
+        [now_str, date_str, p, str(ELITE_DAILY_BONUS), note]
+        for p in attending if p not in already
+    ]
+    if new_rows:
+        ws.append_rows(new_rows)
+        load_elite_data.clear()
+    return len(new_rows)
+
+def delete_elite_record(rec_date: date, player: str) -> None:
+    """刪除特定日期某選手的出席記錄（誤打卡用）"""
+    date_str = rec_date.strftime("%Y-%m-%d")
+    ws       = get_elite_ws()
+    data     = ws.get_all_values()
+    for i, row in enumerate(data[1:], start=2):
+        if len(row) > 2 and row[1] == date_str and row[2] == player:
+            ws.delete_rows(i)
+            load_elite_data.clear()
+            return
+
+def get_elite_month_summary(year: int, month: int, elite_data: list) -> dict:
+    """回傳 {player: [date_str, ...]} 當月已出席日期清單"""
+    prefix  = f"{year:04d}-{month:02d}"
+    summary = {p: [] for p in ELITE_PLAYERS}
+    seen    = set()
+    for row in elite_data[1:]:
+        if len(row) > 2 and row[1].startswith(prefix):
+            key = (row[2], row[1])
+            if key not in seen:
+                seen.add(key)
+                if row[2] in summary:
+                    summary[row[2]].append(row[1])
+                else:
+                    summary[row[2]] = [row[1]]
+    return summary
+
+def generate_elite_report_html(year: int, month: int, elite_data: list) -> str:
+    import calendar
+    prefix    = f"{year:04d}-{month:02d}"
+    today_str = date.today().strftime("%Y/%m/%d")
+    summary   = get_elite_month_summary(year, month, elite_data)
+    n_days    = calendar.monthrange(year, month)[1]
+    days      = [f"{month:02d}/{d:02d}" for d in range(1, n_days + 1)]
+    day_strs  = [f"{year:04d}-{month:02d}-{d:02d}" for d in range(1, n_days + 1)]
+
+    # 每位選手的出席天數與金額
+    player_rows = ""
+    grand_days  = 0
+    grand_total = 0
+    for player in ELITE_PLAYERS:
+        attended = set(summary.get(player, []))
+        cnt      = len(attended)
+        amt      = cnt * ELITE_DAILY_BONUS
+        grand_days  += cnt
+        grand_total += amt
+        day_cells = "".join(
+            f"<td style='text-align:center;background:#D1FAE5;color:#065F46;"
+            f"font-weight:700;'>✓</td>"
+            if ds in attended else
+            f"<td style='text-align:center;color:#E5E7EB;'>-</td>"
+            for ds in day_strs
+        )
+        player_rows += (
+            f"<tr><td style='padding:8px 12px;font-weight:700;white-space:nowrap;'>{player}</td>"
+            f"{day_cells}"
+            f"<td style='padding:8px 12px;text-align:center;font-weight:700;'>{cnt}</td>"
+            f"<td style='padding:8px 12px;text-align:right;font-weight:800;"
+            f"color:#1E3A8A;white-space:nowrap;'>${amt:,}</td></tr>"
+        )
+
+    day_headers = "".join(
+        f"<th style='text-align:center;padding:6px 4px;min-width:28px;"
+        f"font-size:10px;'>{d}</th>"
+        for d in days
+    )
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head><meta charset="utf-8">
+<title>菁英隊 出席獎金 {year}年{month:02d}月</title>
+<style>
+@page {{ margin:10mm; size:A3 landscape; }}
+body {{ font-family:'Noto Sans TC','PingFang TC',sans-serif;background:white;
+       color:#111827;font-size:12px; }}
+h1 {{ font-size:18px;font-weight:800;margin-bottom:4px; }}
+.sub {{ color:#6B7280;font-size:12px;margin-bottom:16px; }}
+table {{ width:100%;border-collapse:collapse; }}
+th {{ background:#1E3A8A;color:white;padding:7px 4px;font-size:11px; }}
+tr:nth-child(even) {{ background:#F9FAFB; }}
+td {{ border:1px solid #E5E7EB; }}
+.grand {{ background:#EFF6FF;font-weight:800; }}
+.footer {{ margin-top:16px;font-size:10px;color:#9CA3AF; }}
+</style></head>
+<body>
+<h1>菁英隊 出席獎金明細</h1>
+<div class="sub">
+  {year}年{month:02d}月 &nbsp;·&nbsp; 出席費 ${ELITE_DAILY_BONUS:,}/天 &nbsp;·&nbsp; 產出日期：{today_str}
+</div>
+<table>
+<thead><tr>
+  <th style="text-align:left;padding:7px 12px;min-width:80px;">姓名</th>
+  {day_headers}
+  <th style="text-align:center;padding:7px 8px;">天數</th>
+  <th style="text-align:right;padding:7px 12px;min-width:70px;">金額</th>
+</tr></thead>
+<tbody>
+{player_rows}
+<tr class="grand">
+  <td style="padding:8px 12px;">合計</td>
+  <td colspan="{n_days}"></td>
+  <td style="padding:8px 12px;text-align:center;">{grand_days}</td>
+  <td style="padding:8px 12px;text-align:right;font-size:15px;">${grand_total:,}</td>
+</tr>
+</tbody>
+</table>
+<div class="footer">※ 出席費 ${ELITE_DAILY_BONUS:,}/天 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+</body></html>"""
 
 
 # ── 週報告 HTML 生成 ─────────────────────────────────────────────
@@ -1397,6 +1547,113 @@ with st.container(border=True):
         use_container_width=True,
         key="dl_champ",
     )
+
+
+# ═════════════════════════════════════════════════════════════════
+# 菁英隊 出席簽到
+# ═════════════════════════════════════════════════════════════════
+with st.container(border=True):
+    st.markdown('<div class="sec-label">👑 菁英隊 出席簽到</div>', unsafe_allow_html=True)
+    st.caption(f"出席費 ${ELITE_DAILY_BONUS:,} 元／天")
+
+    elite_data = load_elite_data()
+    mo_e, yr_e_off = st.session_state.month_offset, st.session_state.month_offset
+    yr_e, mo_e_num = get_month_year(yr_e_off)
+
+    if not ELITE_PLAYERS:
+        st.warning("⚠️ 尚未設定菁英隊選手名單，請在程式碼 ELITE_PLAYERS 填入名單。")
+    else:
+        # ── 每日簽到 ─────────────────────────────────────────────
+        with st.expander("📋 記錄今日出席"):
+            e_date = st.date_input("出席日期", value=date.today(), key="e_date")
+            st.markdown("**勾選今日出席選手：**")
+
+            date_str_e = e_date.strftime("%Y-%m-%d")
+            already_in = {
+                row[2] for row in elite_data[1:]
+                if len(row) > 2 and row[1] == date_str_e
+            }
+
+            e_checks = {}
+            cols_e   = st.columns(3)
+            for idx, p in enumerate(ELITE_PLAYERS):
+                with cols_e[idx % 3]:
+                    default = p in already_in
+                    e_checks[p] = st.checkbox(
+                        f"{'✅ ' if default else ''}{p}",
+                        value=default,
+                        key=f"ep_{p}",
+                    )
+
+            e_note = st.text_input("備注（選填）", key="e_note")
+
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                if st.button("💾 送出今日出席", type="primary",
+                             use_container_width=True, key="e_submit"):
+                    attending = [p for p, v in e_checks.items() if v]
+                    if not attending:
+                        st.warning("請至少勾選一位出席選手")
+                    else:
+                        with st.spinner("記錄中..."):
+                            added = record_elite_attendance(e_date, attending, e_note)
+                        st.success(f"✅ 已記錄 {len(attending)} 人出席"
+                                   + (f"（{added} 筆新增）" if added < len(attending) else ""))
+                        st.rerun()
+            with ec2:
+                # 刪除誤打卡
+                del_player = st.selectbox("刪除誤打卡", ["（不刪除）"] + ELITE_PLAYERS,
+                                          key="e_del_p", label_visibility="collapsed")
+                if del_player != "（不刪除）":
+                    if st.button(f"🗑️ 刪除 {del_player} {date_str_e}",
+                                 key="e_del_btn", use_container_width=True):
+                        delete_elite_record(e_date, del_player)
+                        st.success(f"已刪除 {del_player} {date_str_e} 的記錄")
+                        st.rerun()
+
+        # ── 本月出席總覽 ──────────────────────────────────────────
+        st.write("")
+        e_summary = get_elite_month_summary(yr_e, mo_e_num, elite_data)
+
+        total_e_days = sum(len(v) for v in e_summary.values())
+        total_e_amt  = total_e_days * ELITE_DAILY_BONUS
+
+        ek1, ek2 = st.columns(2)
+        ek1.metric(f"{yr_e}年{mo_e_num:02d}月 總出席人次", f"{total_e_days} 次")
+        ek2.metric("本月發放合計", f"${total_e_amt:,}")
+
+        st.write("")
+        for player in ELITE_PLAYERS:
+            days_list = sorted(e_summary.get(player, []))
+            cnt       = len(days_list)
+            amt       = cnt * ELITE_DAILY_BONUS
+            day_tags  = " ".join(
+                f"<span style='background:#D1FAE5;color:#065F46;padding:2px 7px;"
+                f"border-radius:8px;font-size:12px;margin:2px;display:inline-block;'>"
+                f"{d[5:]}</span>"
+                for d in days_list
+            ) or "<span style='color:#D1D5DB;font-size:13px;'>尚無記錄</span>"
+            st.markdown(
+                f"<div style='padding:10px 0;border-bottom:1px solid #F3F4F6;'>"
+                f"<span style='font-weight:700;font-size:15px;margin-right:12px;'>{player}</span>"
+                f"<span style='color:#6B7280;font-size:13px;margin-right:16px;'>"
+                f"{cnt} 天 · ${amt:,}</span>"
+                f"{day_tags}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── 報表下載 ─────────────────────────────────────────────
+        st.divider()
+        elite_html  = generate_elite_report_html(yr_e, mo_e_num, elite_data)
+        fname_elite = f"菁英隊_出席獎金_{yr_e}{mo_e_num:02d}.html"
+        st.download_button(
+            label=f"📄 下載 {yr_e}年{mo_e_num:02d}月 菁英隊出席明細（交會計用）",
+            data=elite_html.encode("utf-8"),
+            file_name=fname_elite,
+            mime="text/html",
+            use_container_width=True,
+            key="dl_elite",
+        )
 
 
 # ═════════════════════════════════════════════════════════════════
