@@ -46,6 +46,20 @@ PROJECT_MONTHS = 5               # 專案期間：8–12 月，共 5 個月
 # 生力軍：練習參與打卡系統，不計入實際獎金發放
 TRAINEE_PLAYERS = ["陳天宸", "楊昕潔"]
 
+# ── 贊助冠軍經費（獨立贊助商，與訓練獎金分開）────────────────────
+CHAMPION_TAB  = "Champion_DB"
+CHAMPION_ITEMS = {
+    "⚔️ 次一手冠軍": 300,
+    "🧩 判斷冠軍":   100,
+}
+CHAMPION_STATUS_OPTIONS = ["🔴 已墊付", "🟡 已報帳", "✅ 已核銷"]
+CHAMPION_STATUS_BG = {
+    "🔴 已墊付": "#FEE2E2",
+    "🟡 已報帳": "#FEF3C7",
+    "✅ 已核銷": "#D1FAE5",
+}
+CHAMP_COL = {"時間戳":0,"日期":1,"比賽項目":2,"選手":3,"金額":4,"狀態":5,"備注":6}
+
 
 # ── 狀態欄位 helpers（容忍多餘欄位）─────────────────────────────
 def row_status(row: list) -> str:
@@ -129,6 +143,97 @@ def approve_one(row_idx: int, all_data: list) -> None:
     col = row_status_idx_1based(row)
     get_bonus_ws().update_cell(row_idx, col, "已核准")
     load_bonus_data.clear()
+
+@st.cache_resource
+def get_champion_ws():
+    sh = get_gc().open_by_key(BONUS_DB_ID)
+    try:
+        ws = sh.worksheet(CHAMPION_TAB)
+    except Exception:
+        ws = sh.add_worksheet(title=CHAMPION_TAB, rows=300, cols=10)
+        ws.append_row(list(CHAMP_COL.keys()))
+    return ws
+
+@st.cache_data(ttl=30)
+def load_champion_data() -> list:
+    return get_champion_ws().get_all_values()
+
+def add_champion_record(rec_date: date, item: str, player: str,
+                        amount: int, status: str, note: str = "") -> None:
+    from datetime import datetime
+    get_champion_ws().append_row([
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        rec_date.strftime("%Y-%m-%d"),
+        item, player, str(amount), status, note,
+    ])
+    load_champion_data.clear()
+
+def update_champion_status(row_idx: int, new_status: str) -> None:
+    get_champion_ws().update_cell(row_idx, CHAMP_COL["狀態"] + 1, new_status)
+    load_champion_data.clear()
+
+def generate_champion_report_html(year: int, month: int, champ_data: list) -> str:
+    prefix    = f"{year:04d}-{month:02d}"
+    today_str = date.today().strftime("%Y/%m/%d")
+    records   = [r for r in champ_data[1:] if len(r) > 5 and r[1].startswith(prefix)]
+    total       = sum(int(r[4]) for r in records)
+    outstanding = sum(int(r[4]) for r in records if r[5] == "🔴 已墊付")
+
+    rows_html = "".join(
+        f"<tr>"
+        f"<td style='padding:8px 14px;'>{r[1]}</td>"
+        f"<td style='padding:8px 14px;'>{r[2]}</td>"
+        f"<td style='padding:8px 14px;font-weight:700;'>{r[3]}</td>"
+        f"<td style='padding:8px 14px;text-align:right;'>${int(r[4]):,}</td>"
+        f"<td style='padding:8px 14px;text-align:center;'>{r[5]}</td>"
+        f"<td style='padding:8px 14px;color:#6B7280;'>{r[6] if len(r) > 6 else ''}</td>"
+        f"</tr>"
+        for r in records
+    )
+    warn_row = (
+        f"<tr><td colspan='6' style='padding:10px 14px;color:#DC2626;font-weight:700;'>"
+        f"⚠️ 尚未報帳金額：${outstanding:,}</td></tr>"
+        if outstanding > 0 else ""
+    )
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head><meta charset="utf-8">
+<title>次一手贊助經費 {year}年{month:02d}月</title>
+<style>
+@page {{ margin:20mm; }}
+body {{ font-family:'Noto Sans TC','PingFang TC',sans-serif;background:white;color:#111827; }}
+h1 {{ font-size:18px;font-weight:800;margin-bottom:4px; }}
+.sub {{ color:#6B7280;font-size:13px;margin-bottom:20px; }}
+table {{ width:100%;border-collapse:collapse; }}
+th {{ background:#1E3A8A;color:white;padding:9px 14px;font-size:12px;text-align:left; }}
+tr:nth-child(even) {{ background:#F9FAFB; }}
+td {{ border-bottom:1px solid #E5E7EB;font-size:13px; }}
+.grand {{ background:#EFF6FF;font-weight:800; }}
+.footer {{ margin-top:20px;font-size:11px;color:#9CA3AF; }}
+</style></head>
+<body>
+<h1>次一手 贊助冠軍經費明細</h1>
+<div class="sub">{year}年{month:02d}月 &nbsp;·&nbsp; 資金來源：次一手贊助商 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+<table>
+<thead><tr>
+  <th>日期</th><th>比賽項目</th><th>獲獎選手</th>
+  <th style="text-align:right">金額</th><th style="text-align:center">狀態</th><th>備注</th>
+</tr></thead>
+<tbody>
+{rows_html}
+<tr class="grand">
+  <td colspan="3" style="padding:10px 14px;">本月合計</td>
+  <td style="padding:10px 14px;text-align:right;font-size:16px;">${total:,}</td>
+  <td colspan="2"></td>
+</tr>
+{warn_row}
+</tbody>
+</table>
+<div class="footer">
+  ※ 此報表僅含次一手贊助商經費，與棋院訓練獎金系統完全分開 &nbsp;·&nbsp; 產出日期：{today_str}
+</div>
+</body></html>"""
+
 
 def build_heatmap(player: str, week_dates: list[date], all_data: list) -> pd.DataFrame:
     week_strs = {d.strftime("%Y-%m-%d") for d in week_dates}
@@ -1187,6 +1292,103 @@ with st.container(border=True):
         '<span style="background:#FEF3C7;padding:2px 8px;border-radius:4px;color:#92400E;">橘色 替代任務</span>'
         '</div>',
         unsafe_allow_html=True,
+    )
+
+
+# ═════════════════════════════════════════════════════════════════
+# 贊助冠軍經費追蹤
+# ═════════════════════════════════════════════════════════════════
+with st.container(border=True):
+    st.markdown('<div class="sec-label">🏆 贊助冠軍經費</div>', unsafe_allow_html=True)
+    st.caption("資金來源：次一手贊助商 ｜ 與棋院訓練獎金完全分開記帳")
+
+    champ_data = load_champion_data()
+
+    # ── 快速新增 ─────────────────────────────────────────────────
+    with st.expander("➕ 新增一筆冠軍獎金"):
+        ci1, ci2 = st.columns(2)
+        with ci1:
+            item_label  = st.selectbox("比賽項目", list(CHAMPION_ITEMS.keys()), key="ci_item")
+            item_amount = CHAMPION_ITEMS[item_label]
+            st.caption(f"金額：**${item_amount}**")
+        with ci2:
+            ci_player = st.selectbox("獲獎選手", players, key="ci_player")
+        ci3, ci4 = st.columns(2)
+        with ci3:
+            ci_date   = st.date_input("比賽日期", value=date.today(), key="ci_date")
+        with ci4:
+            ci_status = st.selectbox("入帳狀態", CHAMPION_STATUS_OPTIONS, key="ci_status")
+        ci_note = st.text_input("備注（選填）", key="ci_note", placeholder="例如：第3局")
+        if st.button("💾 記帳", type="primary", use_container_width=True, key="ci_submit"):
+            with st.spinner("記錄中..."):
+                add_champion_record(ci_date, item_label, ci_player,
+                                    item_amount, ci_status, ci_note)
+            st.success(f"✅ 已記錄 {item_label}　{ci_player}　${item_amount}　{ci_status}")
+            st.rerun()
+
+    # ── 本月紀錄 ─────────────────────────────────────────────────
+    mo_c  = st.session_state.month_offset
+    yr_c, mo_c_num = get_month_year(mo_c)
+    prefix_c = f"{yr_c:04d}-{mo_c_num:02d}"
+
+    month_champ = [
+        (i + 2, row)
+        for i, row in enumerate(champ_data[1:])
+        if len(row) > 5 and row[1].startswith(prefix_c)
+    ]
+
+    st.write("")
+    if not month_champ:
+        st.info(f"{yr_c}年{mo_c_num:02d}月 尚無記錄")
+    else:
+        total_c       = sum(int(r[4]) for _, r in month_champ)
+        outstanding_c = sum(int(r[4]) for _, r in month_champ if r[5] == "🔴 已墊付")
+
+        kc1, kc2, kc3 = st.columns(3)
+        kc1.metric("本月發放次數", f"{len(month_champ)} 次")
+        kc2.metric("本月發放金額", f"${total_c:,}")
+        kc3.metric("⚠️ 未報帳金額", f"${outstanding_c:,}",
+                   delta=f"-${outstanding_c:,}" if outstanding_c else None,
+                   delta_color="inverse")
+
+        st.write("")
+        for row_idx, row in month_champ:
+            d_str, item, player = row[1], row[2], row[3]
+            amt, status = row[4], row[5]
+            note = row[6] if len(row) > 6 else ""
+            bg   = CHAMPION_STATUS_BG.get(status, "#FFFFFF")
+
+            rc1, rc2, rc3, rc4 = st.columns([2, 4, 2, 3])
+            rc1.markdown(
+                f"<small style='color:#9CA3AF;'>{d_str}</small>",
+                unsafe_allow_html=True,
+            )
+            rc2.markdown(f"**{item}**　{player}", unsafe_allow_html=True)
+            rc3.markdown(f"**${int(amt):,}**", unsafe_allow_html=True)
+            with rc4:
+                new_s = st.selectbox(
+                    "狀態",
+                    CHAMPION_STATUS_OPTIONS,
+                    index=CHAMPION_STATUS_OPTIONS.index(status)
+                          if status in CHAMPION_STATUS_OPTIONS else 0,
+                    key=f"cs_{row_idx}",
+                    label_visibility="collapsed",
+                )
+                if new_s != status:
+                    update_champion_status(row_idx, new_s)
+                    st.rerun()
+
+    # ── 獨立報表下載 ─────────────────────────────────────────────
+    st.divider()
+    champ_html  = generate_champion_report_html(yr_c, mo_c_num, champ_data)
+    fname_champ = f"次一手贊助經費_{yr_c}{mo_c_num:02d}.html"
+    st.download_button(
+        label=f"📄 下載 {yr_c}年{mo_c_num:02d}月 贊助明細（交會計用）",
+        data=champ_html.encode("utf-8"),
+        file_name=fname_champ,
+        mime="text/html",
+        use_container_width=True,
+        key="dl_champ",
     )
 
 
