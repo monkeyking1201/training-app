@@ -920,6 +920,84 @@ small {{ font-size: 10px; display: block; }}
 </html>"""
 
 
+# ── 月度週報彙整 HTML 生成 ────────────────────────────────────────
+def generate_monthly_weekly_report_html(players_list: list, year: int,
+                                        month: int, all_data: list) -> str:
+    import calendar
+    trainee_set = set(TRAINEE_PLAYERS)
+    formal      = [p for p in players_list if p not in trainee_set]
+    today_str   = date.today().strftime("%Y/%m/%d")
+    first_day   = date(year, month, 1)
+    last_day    = date(year, month, calendar.monthrange(year, month)[1])
+
+    # 找出所有與本月有重疊的週（週一開始）
+    start_monday = first_day - timedelta(days=first_day.weekday())
+    weeks = []
+    cur = start_monday
+    while cur <= last_day:
+        week = [cur + timedelta(days=i) for i in range(7)]
+        if week[-1] >= first_day:
+            weeks.append(week)
+        cur += timedelta(weeks=1)
+
+    weeks_html = ""
+    for week in weeks:
+        ws = week[0].strftime("%m/%d")
+        we = week[6].strftime("%m/%d")
+        rows = ""
+        for player in formal:
+            weekly, achievement, _ = calc_bonus(player, week, all_data)
+            if achievement >= 100:
+                color, status = "#059669", "✅ 達標"
+            elif achievement >= 70:
+                color, status = "#D97706", "⚡ 需加速"
+            else:
+                color, status = "#DC2626", "⚠️ 落後"
+            rows += (
+                f"<tr>"
+                f"<td style='padding:7px 14px;font-weight:600;'>{player}</td>"
+                f"<td style='padding:7px 14px;text-align:right;'>${weekly:,}</td>"
+                f"<td style='padding:7px 14px;text-align:center;"
+                f"color:{color};font-weight:700;'>{achievement}%</td>"
+                f"<td style='padding:7px 14px;'>{status}</td>"
+                f"</tr>"
+            )
+        weeks_html += f"""
+        <div style='margin-bottom:28px;page-break-inside:avoid;'>
+        <div style='font-size:14px;font-weight:800;color:#1E3A8A;margin-bottom:8px;
+                    border-bottom:2px solid #BFDBFE;padding-bottom:5px;'>
+            {ws} ～ {we} &nbsp;·&nbsp; 週目標 ${WEEKLY_TARGET:,}／人
+        </div>
+        <table style='width:100%;border-collapse:collapse;font-size:13px;'>
+        <thead><tr style='background:#F3F4F6;'>
+            <th style='padding:7px 14px;text-align:left;border-bottom:1px solid #E5E7EB;'>選手</th>
+            <th style='padding:7px 14px;text-align:right;border-bottom:1px solid #E5E7EB;'>本週獎金</th>
+            <th style='padding:7px 14px;text-align:center;border-bottom:1px solid #E5E7EB;'>達成率</th>
+            <th style='padding:7px 14px;border-bottom:1px solid #E5E7EB;'>狀態</th>
+        </tr></thead>
+        <tbody>{rows}</tbody>
+        </table></div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head><meta charset="utf-8">
+<title>新銳隊 {year}年{month:02d}月 月度週報</title>
+<style>
+@page {{ margin:20mm; }}
+body {{ font-family:'Noto Sans TC','PingFang TC',sans-serif;background:white;color:#111827; }}
+h1 {{ font-size:20px;font-weight:800;margin-bottom:4px; }}
+.sub {{ color:#6B7280;font-size:13px;margin-bottom:24px; }}
+tr:nth-child(even) {{ background:#F9FAFB; }}
+.footer {{ margin-top:24px;font-size:11px;color:#9CA3AF; }}
+</style></head>
+<body>
+<h1>新銳隊 月度週報</h1>
+<div class="sub">{year}年{month:02d}月 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+{weeks_html}
+<div class="footer">※ 以上數據僅含教練已核准項目</div>
+</body></html>"""
+
+
 # ═════════════════════════════════════════════════════════════════
 # 頁面設定
 # ═════════════════════════════════════════════════════════════════
@@ -1172,6 +1250,8 @@ if "elite_month_offset" not in st.session_state:
     st.session_state.elite_month_offset = 0
 if "report_month_offset" not in st.session_state:
     st.session_state.report_month_offset = 0
+if "report_week_offset" not in st.session_state:
+    st.session_state.report_week_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -1706,32 +1786,73 @@ with st.container(border=True):
             st.session_state.report_month_offset += 1
             st.rerun()
 
-    st.write("")
-    btn_week, btn_month = st.columns(2)
+    st.divider()
 
-    with btn_week:
-        week_html = generate_weekly_report_html(players, week_dates, all_data)
-        fname_week = f"新銳隊_週報告_{week_dates[0].strftime('%Y%m%d')}.html"
-        st.download_button(
-            label="📊 生成本週訓練報告",
-            data=week_html.encode("utf-8"),
-            file_name=fname_week,
-            mime="text/html",
-            use_container_width=True,
+    # ── 單週報告（可切換週）─────────────────────────────────────
+    st.markdown("**📊 單週訓練報告**")
+    rwo = st.session_state.report_week_offset
+    rw_dates = get_week_dates(rwo)
+    rw_label = f"{rw_dates[0].strftime('%m/%d')} ～ {rw_dates[6].strftime('%m/%d')}"
+    rw_l, rw_mid, rw_r = st.columns([1, 3, 1])
+    with rw_l:
+        if st.button("← 上週", use_container_width=True, key="rpt_week_prev"):
+            st.session_state.report_week_offset -= 1
+            st.rerun()
+    with rw_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:14px;font-weight:600;"
+            f"color:#374151;padding:6px 0;'>{rw_label}</div>",
+            unsafe_allow_html=True,
         )
-        st.caption("下載後用瀏覽器開啟 → Ctrl+P（或 ⌘P）→ 另存為 PDF")
+    with rw_r:
+        if st.button("下週 →", use_container_width=True, key="rpt_week_next",
+                     disabled=(rwo >= 0)):
+            st.session_state.report_week_offset += 1
+            st.rerun()
+
+    week_html  = generate_weekly_report_html(players, rw_dates, all_data)
+    fname_week = f"新銳隊_週報告_{rw_dates[0].strftime('%Y%m%d')}.html"
+    st.download_button(
+        label=f"⬇️ 下載 {rw_label} 週報告",
+        data=week_html.encode("utf-8"),
+        file_name=fname_week,
+        mime="text/html",
+        use_container_width=True,
+        key="dl_week",
+    )
+    st.caption("下載後用瀏覽器開啟 → Ctrl+P（或 ⌘P）→ 另存為 PDF")
+
+    st.divider()
+
+    # ── 月度報告（財務明細 + 週報彙整）─────────────────────────
+    st.markdown(f"**📅 {yr_r}年{mo_r:02d}月 月度報告**")
+    btn_month, btn_monthly_weekly = st.columns(2)
 
     with btn_month:
         month_html = generate_monthly_finance_html(players, yr_r, mo_r, all_data)
         fname_month = f"新銳隊_獎金明細_{yr_r}{mo_r:02d}.html"
         st.download_button(
-            label=f"💰 生成 {yr_r}年{mo_r:02d}月 財務明細",
+            label="💰 財務明細（交會計）",
             data=month_html.encode("utf-8"),
             file_name=fname_month,
             mime="text/html",
             use_container_width=True,
+            key="dl_month",
         )
-        st.caption("橫式 A4，含明細 · 項目 · 金額，可交財務")
+        st.caption("橫式 A4，逐人逐項，含合計")
+
+    with btn_monthly_weekly:
+        mw_html  = generate_monthly_weekly_report_html(players, yr_r, mo_r, all_data)
+        fname_mw = f"新銳隊_月度週報_{yr_r}{mo_r:02d}.html"
+        st.download_button(
+            label="📊 月度週報彙整",
+            data=mw_html.encode("utf-8"),
+            file_name=fname_mw,
+            mime="text/html",
+            use_container_width=True,
+            key="dl_monthly_weekly",
+        )
+        st.caption("每週一張表，整個月一次看完")
 
 
 # ── 手動刷新 ─────────────────────────────────────────────────────
