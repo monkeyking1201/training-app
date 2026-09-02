@@ -1168,6 +1168,8 @@ if "week_offset" not in st.session_state:
     st.session_state.week_offset = 0
 if "month_offset" not in st.session_state:
     st.session_state.month_offset = 0
+if "elite_month_offset" not in st.session_state:
+    st.session_state.elite_month_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -1558,8 +1560,26 @@ with st.container(border=True):
     st.caption(f"出席費 ${ELITE_DAILY_BONUS:,} 元／天")
 
     elite_data = load_elite_data()
-    mo_e, yr_e_off = st.session_state.month_offset, st.session_state.month_offset
+    yr_e_off   = st.session_state.elite_month_offset
     yr_e, mo_e_num = get_month_year(yr_e_off)
+    elite_month_label = f"{yr_e} 年 {mo_e_num:02d} 月"
+
+    em_l, em_mid, em_r = st.columns([1, 3, 1])
+    with em_l:
+        if st.button("← 上月", use_container_width=True, key="elite_prev"):
+            st.session_state.elite_month_offset -= 1
+            st.rerun()
+    with em_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:15px;font-weight:700;"
+            f"color:#374151;padding:6px 0;'>{elite_month_label}</div>",
+            unsafe_allow_html=True,
+        )
+    with em_r:
+        if st.button("下月 →", use_container_width=True, key="elite_next",
+                     disabled=(yr_e_off >= 0)):
+            st.session_state.elite_month_offset += 1
+            st.rerun()
 
     if not ELITE_PLAYERS:
         st.warning("⚠️ 尚未設定菁英隊選手名單，請在程式碼 ELITE_PLAYERS 填入名單。")
