@@ -1170,6 +1170,8 @@ if "month_offset" not in st.session_state:
     st.session_state.month_offset = 0
 if "elite_month_offset" not in st.session_state:
     st.session_state.elite_month_offset = 0
+if "report_month_offset" not in st.session_state:
+    st.session_state.report_month_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -1681,7 +1683,29 @@ with st.container(border=True):
 # 報告下載區
 # ═════════════════════════════════════════════════════════════════
 with st.container(border=True):
-    st.markdown('<div class="sec-label">📄 報告下載</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-label">📄 新銳隊 報告下載</div>', unsafe_allow_html=True)
+    st.write("")
+
+    # ── 月份導覽（獨立，不影響其他區塊）────────────────────────
+    rmo = st.session_state.report_month_offset
+    yr_r, mo_r = get_month_year(rmo)
+    rl, rmid, rr = st.columns([1, 3, 1])
+    with rl:
+        if st.button("← 上月", use_container_width=True, key="rpt_prev"):
+            st.session_state.report_month_offset -= 1
+            st.rerun()
+    with rmid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:15px;font-weight:700;"
+            f"color:#374151;padding:6px 0;'>{yr_r} 年 {mo_r:02d} 月</div>",
+            unsafe_allow_html=True,
+        )
+    with rr:
+        if st.button("下月 →", use_container_width=True, key="rpt_next",
+                     disabled=(rmo >= 0)):
+            st.session_state.report_month_offset += 1
+            st.rerun()
+
     st.write("")
     btn_week, btn_month = st.columns(2)
 
@@ -1698,12 +1722,10 @@ with st.container(border=True):
         st.caption("下載後用瀏覽器開啟 → Ctrl+P（或 ⌘P）→ 另存為 PDF")
 
     with btn_month:
-        mo_now = st.session_state.month_offset
-        yr_now, mo_num = get_month_year(mo_now)
-        month_html = generate_monthly_finance_html(players, yr_now, mo_num, all_data)
-        fname_month = f"新銳隊_獎金明細_{yr_now}{mo_num:02d}.html"
+        month_html = generate_monthly_finance_html(players, yr_r, mo_r, all_data)
+        fname_month = f"新銳隊_獎金明細_{yr_r}{mo_r:02d}.html"
         st.download_button(
-            label=f"💰 生成 {yr_now}年{mo_num:02d}月 財務明細",
+            label=f"💰 生成 {yr_r}年{mo_r:02d}月 財務明細",
             data=month_html.encode("utf-8"),
             file_name=fname_month,
             mime="text/html",
