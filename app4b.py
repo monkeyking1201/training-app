@@ -76,6 +76,16 @@ ELITE_PLAYERS = [
 ]
 ELITE_COL = {"時間戳":0,"日期":1,"選手":2,"金額":3,"備注":4}
 
+# ── 交流費用（院長個人墊付，與訓練獎金分開）──────────────────────
+EXCHANGE_TAB = "Exchange_DB"
+EXCHANGE_STATUS_OPTIONS = ["🔴 已墊付", "🟡 已報帳", "✅ 已核銷"]
+EXCHANGE_STATUS_BG = {
+    "🔴 已墊付": "#FEE2E2",
+    "🟡 已報帳": "#FEF3C7",
+    "✅ 已核銷": "#D1FAE5",
+}
+EXCH_COL = {"時間戳": 0, "日期": 1, "項目": 2, "金額": 3, "狀態": 4, "備注": 5}
+
 
 # ── 狀態欄位 helpers（容忍多餘欄位）─────────────────────────────
 def row_status(row: list) -> str:
@@ -749,6 +759,97 @@ td {{ border:1px solid #E5E7EB; }}
 </body></html>"""
 
 
+# ── 交流費用 Google Sheet 連線與資料函式 ─────────────────────────
+@st.cache_resource
+def get_exchange_ws():
+    sh = get_gc().open_by_key(BONUS_DB_ID)
+    try:
+        ws = sh.worksheet(EXCHANGE_TAB)
+    except Exception:
+        ws = sh.add_worksheet(title=EXCHANGE_TAB, rows=500, cols=8)
+        ws.append_row(list(EXCH_COL.keys()))
+    return ws
+
+@st.cache_data(ttl=30)
+def load_exchange_data() -> list:
+    return get_exchange_ws().get_all_values()
+
+def add_exchange_record(rec_date: date, item_desc: str, amount: int,
+                        status: str, note: str = "") -> None:
+    from datetime import datetime
+    get_exchange_ws().append_row([
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        rec_date.strftime("%Y-%m-%d"),
+        item_desc, str(amount), status, note,
+    ])
+    load_exchange_data.clear()
+
+def update_exchange_status(row_idx: int, new_status: str) -> None:
+    get_exchange_ws().update_cell(row_idx, EXCH_COL["狀態"] + 1, new_status)
+    load_exchange_data.clear()
+
+def generate_exchange_report_html(year: int, month: int, exch_data: list) -> str:
+    prefix    = f"{year:04d}-{month:02d}"
+    today_str = date.today().strftime("%Y/%m/%d")
+    records   = [r for r in exch_data[1:] if len(r) > 4 and r[1].startswith(prefix)]
+    total       = sum(int(r[3]) for r in records)
+    outstanding = sum(int(r[3]) for r in records if r[4] == "🔴 已墊付")
+
+    rows_html = "".join(
+        f"<tr>"
+        f"<td style='padding:8px 14px;'>{r[1]}</td>"
+        f"<td style='padding:8px 14px;'>{r[2]}</td>"
+        f"<td style='padding:8px 14px;text-align:right;'>${int(r[3]):,}</td>"
+        f"<td style='padding:8px 14px;text-align:center;'>{r[4]}</td>"
+        f"<td style='padding:8px 14px;color:#6B7280;'>{r[5] if len(r) > 5 else ''}</td>"
+        f"</tr>"
+        for r in records
+    )
+    warn_row = (
+        f"<tr><td colspan='5' style='padding:10px 14px;color:#DC2626;font-weight:700;'>"
+        f"⚠️ 尚未報帳金額：${outstanding:,}</td></tr>"
+        if outstanding > 0 else ""
+    )
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head><meta charset="utf-8">
+<title>交流費用 {year}年{month:02d}月</title>
+<style>
+@page {{ margin:20mm; }}
+body {{ font-family:'Noto Sans TC','PingFang TC',sans-serif;background:white;color:#111827; }}
+h1 {{ font-size:18px;font-weight:800;margin-bottom:4px; }}
+.sub {{ color:#6B7280;font-size:13px;margin-bottom:20px; }}
+table {{ width:100%;border-collapse:collapse; }}
+th {{ background:#065F46;color:white;padding:9px 14px;font-size:12px;text-align:left; }}
+tr:nth-child(even) {{ background:#F9FAFB; }}
+td {{ border-bottom:1px solid #E5E7EB;font-size:13px; }}
+.grand {{ background:#ECFDF5;font-weight:800; }}
+.footer {{ margin-top:20px;font-size:11px;color:#9CA3AF; }}
+</style></head>
+<body>
+<h1>交流費用明細</h1>
+<div class="sub">{year}年{month:02d}月 &nbsp;·&nbsp; 院長個人墊付 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+<table>
+<thead><tr>
+  <th>日期</th><th>交流項目</th>
+  <th style="text-align:right">金額</th><th style="text-align:center">狀態</th><th>備注</th>
+</tr></thead>
+<tbody>
+{rows_html}
+<tr class="grand">
+  <td colspan="2" style="padding:10px 14px;">本月合計</td>
+  <td style="padding:10px 14px;text-align:right;font-size:16px;">${total:,}</td>
+  <td colspan="2"></td>
+</tr>
+{warn_row}
+</tbody>
+</table>
+<div class="footer">
+  ※ 此報表為交流費用墊付記錄，與棋院訓練獎金系統完全分開 &nbsp;·&nbsp; 產出日期：{today_str}
+</div>
+</body></html>"""
+
+
 # ── 週報告 HTML 生成 ─────────────────────────────────────────────
 def generate_weekly_report_html(players_list: list, wd: list[date], all_data: list) -> str:
     trainee_set = set(TRAINEE_PLAYERS)
@@ -1252,6 +1353,8 @@ if "report_month_offset" not in st.session_state:
     st.session_state.report_month_offset = 0
 if "report_week_offset" not in st.session_state:
     st.session_state.report_week_offset = 0
+if "exchange_month_offset" not in st.session_state:
+    st.session_state.exchange_month_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -1631,6 +1734,126 @@ with st.container(border=True):
         mime="text/html",
         use_container_width=True,
         key="dl_champ",
+    )
+
+
+# ═════════════════════════════════════════════════════════════════
+# 交流費用追蹤
+# ═════════════════════════════════════════════════════════════════
+with st.container(border=True):
+    st.markdown('<div class="sec-label">🌏 交流費用</div>', unsafe_allow_html=True)
+    st.caption("院長個人墊付 ｜ 與棋院訓練獎金完全分開記帳")
+
+    exch_data = load_exchange_data()
+
+    # ── 快速新增 ─────────────────────────────────────────────────
+    with st.expander("➕ 新增一筆交流費用"):
+        ex1, ex2 = st.columns(2)
+        with ex1:
+            ex_date   = st.date_input("費用日期", value=date.today(), key="ex_date")
+        with ex2:
+            ex_amount = st.number_input("金額（元）", min_value=0, step=100,
+                                        value=0, key="ex_amount")
+        ex_desc = st.text_input("交流項目描述", key="ex_desc",
+                                placeholder="例如：中日韓交流餐費、場地費、住宿費...")
+        ex3, ex4 = st.columns(2)
+        with ex3:
+            ex_status = st.selectbox("入帳狀態", EXCHANGE_STATUS_OPTIONS, key="ex_status")
+        with ex4:
+            ex_note = st.text_input("備注（選填）", key="ex_note")
+        if st.button("💾 記帳", type="primary", use_container_width=True, key="ex_submit"):
+            if not ex_desc.strip():
+                st.warning("請填寫交流項目描述")
+            elif ex_amount <= 0:
+                st.warning("請填寫金額")
+            else:
+                with st.spinner("記錄中..."):
+                    add_exchange_record(ex_date, ex_desc.strip(),
+                                        int(ex_amount), ex_status, ex_note)
+                st.success(f"✅ 已記錄　{ex_desc.strip()}　${int(ex_amount):,}　{ex_status}")
+                st.rerun()
+
+    # ── 月份導覽（獨立，不影響其他區塊）────────────────────────
+    ex_mo_off = st.session_state.exchange_month_offset
+    yr_ex, mo_ex_num = get_month_year(ex_mo_off)
+
+    exm_l, exm_mid, exm_r = st.columns([1, 3, 1])
+    with exm_l:
+        if st.button("← 上月", use_container_width=True, key="ex_prev"):
+            st.session_state.exchange_month_offset -= 1
+            st.rerun()
+    with exm_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:15px;font-weight:700;"
+            f"color:#374151;padding:6px 0;'>{yr_ex} 年 {mo_ex_num:02d} 月</div>",
+            unsafe_allow_html=True,
+        )
+    with exm_r:
+        if st.button("下月 →", use_container_width=True, key="ex_next",
+                     disabled=(ex_mo_off >= 0)):
+            st.session_state.exchange_month_offset += 1
+            st.rerun()
+
+    # ── 本月記錄 ─────────────────────────────────────────────────
+    prefix_ex  = f"{yr_ex:04d}-{mo_ex_num:02d}"
+    month_exch = [
+        (i + 2, row)
+        for i, row in enumerate(exch_data[1:])
+        if len(row) > 4 and row[1].startswith(prefix_ex)
+    ]
+
+    st.write("")
+    if not month_exch:
+        st.info(f"{yr_ex}年{mo_ex_num:02d}月 尚無記錄")
+    else:
+        total_ex       = sum(int(r[3]) for _, r in month_exch)
+        outstanding_ex = sum(int(r[3]) for _, r in month_exch if r[4] == "🔴 已墊付")
+
+        ek1, ek2, ek3 = st.columns(3)
+        ek1.metric("本月記錄筆數", f"{len(month_exch)} 筆")
+        ek2.metric("本月墊付合計", f"${total_ex:,}")
+        ek3.metric("⚠️ 未報帳金額", f"${outstanding_ex:,}",
+                   delta=f"-${outstanding_ex:,}" if outstanding_ex else None,
+                   delta_color="inverse")
+
+        st.write("")
+        for row_idx, row in month_exch:
+            d_str  = row[1]
+            item_d = row[2]
+            amt    = row[3]
+            status = row[4]
+
+            re1, re2, re3, re4 = st.columns([2, 4, 2, 3])
+            re1.markdown(
+                f"<small style='color:#9CA3AF;'>{d_str}</small>",
+                unsafe_allow_html=True,
+            )
+            re2.markdown(item_d)
+            re3.markdown(f"**${int(amt):,}**", unsafe_allow_html=True)
+            with re4:
+                new_s = st.selectbox(
+                    "狀態",
+                    EXCHANGE_STATUS_OPTIONS,
+                    index=EXCHANGE_STATUS_OPTIONS.index(status)
+                          if status in EXCHANGE_STATUS_OPTIONS else 0,
+                    key=f"es_{row_idx}",
+                    label_visibility="collapsed",
+                )
+                if new_s != status:
+                    update_exchange_status(row_idx, new_s)
+                    st.rerun()
+
+    # ── 報表下載 ─────────────────────────────────────────────────
+    st.divider()
+    exch_html  = generate_exchange_report_html(yr_ex, mo_ex_num, exch_data)
+    fname_exch = f"交流費用_{yr_ex}{mo_ex_num:02d}.html"
+    st.download_button(
+        label=f"📄 下載 {yr_ex}年{mo_ex_num:02d}月 交流費用明細（交會計用）",
+        data=exch_html.encode("utf-8"),
+        file_name=fname_exch,
+        mime="text/html",
+        use_container_width=True,
+        key="dl_exch",
     )
 
 
