@@ -1750,7 +1750,9 @@ with st.container(border=True):
     with st.expander("➕ 新增一筆交流費用"):
         ex1, ex2 = st.columns(2)
         with ex1:
-            ex_date   = st.date_input("費用日期", value=date.today(), key="ex_date")
+            ex_date   = st.date_input("費用日期", value=date.today(),
+                                      min_value=date(2026, 8, 1),
+                                      max_value=date.today(), key="ex_date")
         with ex2:
             ex_amount = st.number_input("金額（元）", min_value=0, step=100,
                                         value=0, key="ex_amount")
@@ -1891,7 +1893,9 @@ with st.container(border=True):
     else:
         # ── 每日簽到 ─────────────────────────────────────────────
         with st.expander("📋 記錄今日出席"):
-            e_date = st.date_input("出席日期", value=date.today(), key="e_date")
+            e_date = st.date_input("出席日期", value=date.today(),
+                                   min_value=date(2026, 8, 1),
+                                   max_value=date.today(), key="e_date")
             st.markdown("**勾選今日出席選手：**")
 
             date_str_e = e_date.strftime("%Y-%m-%d")
