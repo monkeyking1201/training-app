@@ -828,7 +828,7 @@ td {{ border-bottom:1px solid #E5E7EB;font-size:13px; }}
 </style></head>
 <body>
 <h1>交流費用明細</h1>
-<div class="sub">{year}年{month:02d}月 &nbsp;·&nbsp; 院長個人墊付 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+<div class="sub">{year}年{month:02d}月 &nbsp;·&nbsp; 教練墊付 &nbsp;·&nbsp; 產出日期：{today_str}</div>
 <table>
 <thead><tr>
   <th>日期</th><th>交流項目</th>
@@ -845,7 +845,7 @@ td {{ border-bottom:1px solid #E5E7EB;font-size:13px; }}
 </tbody>
 </table>
 <div class="footer">
-  ※ 此報表為交流費用墊付記錄，與棋院訓練獎金系統完全分開 &nbsp;·&nbsp; 產出日期：{today_str}
+  ※ 此報表為教練交流費用墊付記錄，與棋院訓練獎金系統完全分開 &nbsp;·&nbsp; 產出日期：{today_str}
 </div>
 </body></html>"""
 
@@ -1355,6 +1355,8 @@ if "report_week_offset" not in st.session_state:
     st.session_state.report_week_offset = 0
 if "exchange_month_offset" not in st.session_state:
     st.session_state.exchange_month_offset = 0
+if "champ_month_offset" not in st.session_state:
+    st.session_state.champ_month_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -1671,9 +1673,28 @@ with st.container(border=True):
             st.success(f"✅ 已記錄 {item_label}　{ci_player}　${item_amount}　{ci_status}")
             st.rerun()
 
-    # ── 本月紀錄 ─────────────────────────────────────────────────
-    mo_c  = st.session_state.month_offset
+    # ── 月份導覽（獨立）─────────────────────────────────────────
+    mo_c = st.session_state.champ_month_offset
     yr_c, mo_c_num = get_month_year(mo_c)
+
+    cm_l, cm_mid, cm_r = st.columns([1, 3, 1])
+    with cm_l:
+        if st.button("← 上月", use_container_width=True, key="champ_prev"):
+            st.session_state.champ_month_offset -= 1
+            st.rerun()
+    with cm_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:15px;font-weight:700;"
+            f"color:#374151;padding:6px 0;'>{yr_c} 年 {mo_c_num:02d} 月</div>",
+            unsafe_allow_html=True,
+        )
+    with cm_r:
+        if st.button("下月 →", use_container_width=True, key="champ_next",
+                     disabled=(mo_c >= 0)):
+            st.session_state.champ_month_offset += 1
+            st.rerun()
+
+    # ── 本月紀錄 ─────────────────────────────────────────────────
     prefix_c = f"{yr_c:04d}-{mo_c_num:02d}"
 
     month_champ = [
@@ -1742,7 +1763,7 @@ with st.container(border=True):
 # ═════════════════════════════════════════════════════════════════
 with st.container(border=True):
     st.markdown('<div class="sec-label">🌏 交流費用</div>', unsafe_allow_html=True)
-    st.caption("院長個人墊付 ｜ 與棋院訓練獎金完全分開記帳")
+    st.caption("教練墊付 ｜ 與棋院訓練獎金完全分開記帳")
 
     exch_data = load_exchange_data()
 
