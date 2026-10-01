@@ -1748,14 +1748,27 @@ with st.container(border=True):
 
     # ── 快速新增 ─────────────────────────────────────────────────
     with st.expander("➕ 新增一筆交流費用"):
-        ex1, ex2 = st.columns(2)
-        with ex1:
-            ex_date   = st.date_input("費用日期", value=date.today(),
-                                      min_value=date(2026, 8, 1),
-                                      max_value=date.today(), key="ex_date")
-        with ex2:
-            ex_amount = st.number_input("金額（元）", min_value=0, step=100,
-                                        value=0, key="ex_amount")
+        import calendar as _cal2
+        _today2 = date.today()
+        _m_opts2 = list(range(8, 13)) if _today2.year == 2026 else list(range(1, 13))
+        ex_col_y, ex_col_m, ex_col_d = st.columns(3)
+        with ex_col_y:
+            ex_year = st.selectbox("年", [2026, 2027],
+                                   index=0 if _today2.year == 2026 else 1, key="ex_year")
+        with ex_col_m:
+            ex_month = st.selectbox("月", _m_opts2,
+                                    format_func=lambda x: f"{x:02d} 月",
+                                    index=len(_m_opts2) - 1, key="ex_month")
+        with ex_col_d:
+            _max_d2 = _cal2.monthrange(ex_year, ex_month)[1]
+            _def_d2 = _today2.day if ex_month == _today2.month and ex_year == _today2.year else _max_d2
+            ex_day = st.selectbox("日", list(range(1, _max_d2 + 1)),
+                                  format_func=lambda x: f"{x:02d} 日",
+                                  index=min(_def_d2, _max_d2) - 1, key="ex_day")
+        ex_date = date(ex_year, ex_month, ex_day)
+
+        ex_amount = st.number_input("金額（元）", min_value=0, step=100,
+                                    value=0, key="ex_amount")
         ex_desc = st.text_input("交流項目描述", key="ex_desc",
                                 placeholder="例如：中日韓交流餐費、場地費、住宿費...")
         ex3, ex4 = st.columns(2)
@@ -1893,9 +1906,30 @@ with st.container(border=True):
     else:
         # ── 每日簽到 ─────────────────────────────────────────────
         with st.expander("📋 記錄今日出席"):
-            e_date = st.date_input("出席日期", value=date.today(),
-                                   min_value=date(2026, 8, 1),
-                                   max_value=date.today(), key="e_date")
+            import calendar as _cal
+            _today = date.today()
+            _year_opts  = [2026, 2027]
+            _month_opts = list(range(8, 13)) if _today.year == 2026 else list(range(1, 13))
+            ec_y, ec_m, ec_d = st.columns(3)
+            with ec_y:
+                e_year = st.selectbox("年", _year_opts,
+                                      index=_year_opts.index(_today.year) if _today.year in _year_opts else 0,
+                                      key="e_year")
+            with ec_m:
+                e_month = st.selectbox("月", _month_opts,
+                                       format_func=lambda x: f"{x:02d} 月",
+                                       index=len(_month_opts) - 1,
+                                       key="e_month")
+            with ec_d:
+                _max_day = _cal.monthrange(e_year, e_month)[1]
+                _default_day = _today.day if e_month == _today.month and e_year == _today.year else _max_day
+                _default_day = min(_default_day, _max_day)
+                e_day = st.selectbox("日", list(range(1, _max_day + 1)),
+                                     format_func=lambda x: f"{x:02d} 日",
+                                     index=_default_day - 1,
+                                     key="e_day")
+            e_date = date(e_year, e_month, e_day)
+            st.caption(f"出席日期：{e_year}/{e_month:02d}/{e_day:02d}（{WEEKDAY_ZH[e_date.weekday()]}）")
             st.markdown("**勾選今日出席選手：**")
 
             date_str_e = e_date.strftime("%Y-%m-%d")
