@@ -850,6 +850,115 @@ td {{ border-bottom:1px solid #E5E7EB;font-size:13px; }}
 </body></html>"""
 
 
+# ── 院長訓練總覽 HTML 生成 ───────────────────────────────────────
+def render_principal_matrix_html(
+    summary_cur: list, summary_prev: list, year: int, month: int
+) -> str:
+    """summary_cur/prev: list of {name, item_counts, alt_count, days}"""
+    TASK_ITEMS = list(ITEM_COL_IDX.keys())
+    TASK_ICON  = {"出席率":"📌","死活題":"🧩","次一手":"🎯","輸棋討論":"🗣️","AI人機大戰":"🤖","新銳循環賽":"⚔️"}
+    # Thresholds: [green_min, yellow_min]
+    THRESHOLDS = {
+        "出席率":     (14, 9),
+        "死活題":     (12, 8),
+        "次一手":     (5,  3),
+        "輸棋討論":   (5,  3),
+        "AI人機大戰": (7,  4),
+        "新銳循環賽": (7,  4),
+    }
+    def cell_style(item, cnt):
+        g, y = THRESHOLDS[item]
+        if cnt >= g:   return "background:#D1FAE5;color:#065F46;"
+        if cnt >= y:   return "background:#FEF3C7;color:#92400E;"
+        if cnt == 0:   return "background:#FEE2E2;color:#DC2626;opacity:.5;"
+        return                "background:#FEE2E2;color:#DC2626;"
+    def arrow(c, p):
+        d = c - p
+        if p == 0 or abs(d) <= 1: return ""
+        if d > 0: return f'<span style="color:#059669;font-size:9px;"> ▲{d}</span>'
+        return          f'<span style="color:#DC2626;font-size:9px;"> ▼{abs(d)}</span>'
+
+    prev_map = {s["name"]: s for s in summary_prev}
+
+    # Header
+    th = "".join(
+        f'<th style="background:#1F2937;color:white;padding:7px 8px;'
+        f'text-align:center;font-size:11px;white-space:nowrap;">'
+        f'{TASK_ICON[item]} {item}<br>'
+        f'<span style="font-weight:400;font-size:9px;opacity:.7;">${ITEM_PRICES[item]}/次</span></th>'
+        for item in TASK_ITEMS
+    )
+
+    # Rows
+    rows = ""
+    totals = {item: 0 for item in TASK_ITEMS}
+    total_alt = 0
+    n = len(summary_cur)
+    for s in summary_cur:
+        nm = s["name"]
+        prev = prev_map.get(nm, {"item_counts": {i: 0 for i in TASK_ITEMS}, "alt_count": 0})
+        cells = ""
+        for item in TASK_ITEMS:
+            cnt  = s["item_counts"].get(item, 0)
+            pcnt = prev["item_counts"].get(item, 0)
+            totals[item] += cnt
+            cells += (f'<td style="padding:7px 8px;text-align:center;'
+                      f'{cell_style(item, cnt)}font-weight:700;">'
+                      f'{cnt}{arrow(cnt, pcnt)}</td>')
+        alt = s.get("alt_count", 0)
+        total_alt += alt
+        p_alt = prev.get("alt_count", 0)
+        rows += (f'<tr><td style="padding:7px 12px;font-weight:800;'
+                 f'white-space:nowrap;border-right:2px solid #E5E7EB;">{nm}</td>'
+                 f'{cells}'
+                 f'<td style="padding:7px 8px;text-align:center;'
+                 f'background:#F3F4F6;color:#374151;font-weight:600;">'
+                 f'{alt}{arrow(alt, p_alt)}</td></tr>')
+
+    # Totals / averages row
+    tot_cells = ""
+    for item in TASK_ITEMS:
+        avg = totals[item] / n if n else 0
+        tot_cells += (f'<td style="padding:7px 8px;text-align:center;'
+                      f'background:#EFF6FF;font-weight:900;color:#1E3A8A;">'
+                      f'{totals[item]}<br>'
+                      f'<span style="font-size:9px;font-weight:400;color:#6B7280;">均{avg:.1f}</span></td>')
+    tot_cells += (f'<td style="padding:7px 8px;text-align:center;'
+                  f'background:#EFF6FF;font-weight:900;color:#1E3A8A;">{total_alt}</td>')
+
+    # Difficulty spotlight (lowest avg column)
+    min_item = min(TASK_ITEMS[1:], key=lambda i: totals[i] / n if n else 0)  # skip 出席率
+    spotlight = (f'<div style="margin-top:8px;background:#FEF3C7;border-left:3px solid #D97706;'
+                 f'padding:7px 12px;border-radius:0 6px 6px 0;font-size:11.5px;color:#92400E;">'
+                 f'⚠️ <strong>{year}年{month:02d}月 最需加強項目：{TASK_ICON[min_item]} {min_item}</strong>'
+                 f'（全隊均 {totals[min_item]/n:.1f} 次）</div>')
+
+    return f"""
+<style>
+.pm-tbl {{width:100%;border-collapse:collapse;font-size:12.5px;}}
+.pm-tbl td,.pm-tbl th {{border:1px solid #E5E7EB;}}
+.pm-tbl tbody tr:hover td {{filter:brightness(0.95);}}
+</style>
+<table class="pm-tbl">
+<thead>
+  <tr>
+    <th style="background:#1F2937;color:white;padding:7px 12px;text-align:left;min-width:80px;">選手</th>
+    {th}
+    <th style="background:#1F2937;color:white;padding:7px 8px;text-align:center;font-size:11px;">🔥 替代任務</th>
+  </tr>
+</thead>
+<tbody>
+{rows}
+<tr style="border-top:2px solid #93C5FD;">
+  <td style="padding:7px 12px;font-weight:900;background:#EFF6FF;color:#1E3A8A;border-right:2px solid #E5E7EB;">全隊合計</td>
+  {tot_cells}
+</tr>
+</tbody>
+</table>
+{spotlight}
+"""
+
+
 # ── 週報告 HTML 生成 ─────────────────────────────────────────────
 def generate_weekly_report_html(players_list: list, wd: list[date], all_data: list) -> str:
     trainee_set = set(TRAINEE_PLAYERS)
@@ -1357,6 +1466,8 @@ if "exchange_month_offset" not in st.session_state:
     st.session_state.exchange_month_offset = 0
 if "champ_month_offset" not in st.session_state:
     st.session_state.champ_month_offset = 0
+if "principal_month_offset" not in st.session_state:
+    st.session_state.principal_month_offset = 0
 
 all_data   = load_bonus_data()
 week_dates = get_week_dates(st.session_state.week_offset)
@@ -2039,6 +2150,56 @@ with st.container(border=True):
             use_container_width=True,
             key="dl_elite",
         )
+
+
+# ═════════════════════════════════════════════════════════════════
+# 院長訓練總覽
+# ═════════════════════════════════════════════════════════════════
+with st.container(border=True):
+    st.markdown('<div class="sec-label">🎯 院長訓練總覽</div>', unsafe_allow_html=True)
+    st.write("")
+
+    pmo = st.session_state.principal_month_offset
+    yr_p, mo_p = get_month_year(pmo)
+    yr_prev_p, mo_prev_p = get_month_year(pmo - 1)
+
+    pp_l, pp_mid, pp_r = st.columns([1, 3, 1])
+    with pp_l:
+        if st.button("← 上月", use_container_width=True, key="principal_prev"):
+            st.session_state.principal_month_offset -= 1
+            st.rerun()
+    with pp_mid:
+        st.markdown(
+            f"<div style='text-align:center;font-size:15px;font-weight:700;"
+            f"color:#374151;padding:6px 0;'>{yr_p} 年 {mo_p:02d} 月</div>",
+            unsafe_allow_html=True,
+        )
+    with pp_r:
+        if st.button("下月 →", use_container_width=True, key="principal_next",
+                     disabled=(pmo >= 0)):
+            st.session_state.principal_month_offset += 1
+            st.rerun()
+
+    # Build data for current and previous month
+    paying = [p for p in players if p not in TRAINEE_PLAYERS]
+    trainees = [p for p in players if p in TRAINEE_PLAYERS]
+    all_pnames = paying + trainees
+
+    summary_cur  = []
+    summary_prev = []
+    for p in all_pnames:
+        sc = calc_monthly_bonus_one(p, yr_p, mo_p, all_data)
+        sc["name"] = p
+        summary_cur.append(sc)
+        sp = calc_monthly_bonus_one(p, yr_prev_p, mo_prev_p, all_data)
+        sp["name"] = p
+        summary_prev.append(sp)
+
+    st.markdown(
+        render_principal_matrix_html(summary_cur, summary_prev, yr_p, mo_p),
+        unsafe_allow_html=True,
+    )
+    st.caption("🟢 綠色 = 表現良好　🟡 黃色 = 尚可，可加強　🔴 紅色 = 需要關注　·　小箭頭 ▲▼ 為與上月比較")
 
 
 # ═════════════════════════════════════════════════════════════════
