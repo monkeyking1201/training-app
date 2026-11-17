@@ -959,6 +959,190 @@ def render_principal_matrix_html(
 """
 
 
+
+
+# ── 院長訓練總覽 獨立 HTML 報告 ──────────────────────────────────
+def generate_principal_report_html(
+    summary_cur: list, summary_prev: list, year: int, month: int
+) -> str:
+    """Standalone A4 printable HTML for the principal training overview."""
+    from datetime import date as _date
+    today_str = _date.today().strftime("%Y/%m/%d")
+
+    TASK_ITEMS = list(ITEM_COL_IDX.keys())
+    TASK_ICON  = {"出席率":"📌","死活題":"🧩","次一手":"🎯","輸棋討論":"🗣️","AI人機大戰":"🤖","新銳循環賽":"⚔️"}
+    THRESHOLDS = {
+        "出席率":     (14, 9),
+        "死活題":     (12, 8),
+        "次一手":     (5,  3),
+        "輸棋討論":   (5,  3),
+        "AI人機大戰": (7,  4),
+        "新銳循環賽": (7,  4),
+    }
+
+    def cell_style(item, cnt):
+        g, y = THRESHOLDS[item]
+        if cnt >= g:   return "background:#D1FAE5;color:#065F46;"
+        if cnt >= y:   return "background:#FEF3C7;color:#92400E;"
+        if cnt == 0:   return "background:#FEE2E2;color:#DC2626;opacity:.5;"
+        return                "background:#FEE2E2;color:#DC2626;"
+
+    def arrow(c, p):
+        d = c - p
+        if p == 0 or abs(d) <= 1: return ""
+        if d > 0: return f'<span style="color:#059669;font-size:9px;"> ▲{d}</span>'
+        return          f'<span style="color:#DC2626;font-size:9px;"> ▼{abs(d)}</span>'
+
+    prev_map = {s["name"]: s for s in summary_prev}
+
+    # Table header
+    th = "".join(
+        f'<th>{TASK_ICON[item]} {item}<br><span class="price">${ITEM_PRICES[item]}/次</span></th>'
+        for item in TASK_ITEMS
+    )
+
+    # Data rows
+    rows = ""
+    totals   = {item: 0 for item in TASK_ITEMS}
+    total_alt = 0
+    n = len(summary_cur)
+    for s in summary_cur:
+        nm   = s["name"]
+        prev = prev_map.get(nm, {"item_counts": {i: 0 for i in TASK_ITEMS}, "alt_count": 0})
+        cells = ""
+        for item in TASK_ITEMS:
+            cnt  = s["item_counts"].get(item, 0)
+            pcnt = prev["item_counts"].get(item, 0)
+            totals[item] += cnt
+            cells += f'<td style="{cell_style(item, cnt)}font-weight:700;">{cnt}{arrow(cnt, pcnt)}</td>'
+        alt   = s.get("alt_count", 0)
+        p_alt = prev.get("alt_count", 0)
+        total_alt += alt
+        rows += (f'<tr><td class="name">{nm}</td>{cells}'
+                 f'<td style="background:#F3F4F6;color:#374151;font-weight:600;">{alt}{arrow(alt, p_alt)}</td></tr>')
+
+    # Totals row
+    tot_cells = ""
+    for item in TASK_ITEMS:
+        avg = totals[item] / n if n else 0
+        tot_cells += (f'<td style="background:#EFF6FF;font-weight:900;color:#1E3A8A;">'
+                      f'{totals[item]}<br><span class="price">均{avg:.1f}</span></td>')
+    tot_cells += f'<td style="background:#EFF6FF;font-weight:900;color:#1E3A8A;">{total_alt}</td>'
+
+    # Spotlight
+    min_item   = min(TASK_ITEMS[1:], key=lambda i: totals[i] / n if n else 0)
+    spotlight  = (f'<div class="spotlight">⚠️ <strong>{year}年{month:02d}月 最需加強：{TASK_ICON[min_item]} {min_item}</strong>'
+                  f'（全隊均 {totals[min_item]/n:.1f} 次）</div>')
+
+    # Individual bar charts
+    player_cards = ""
+    max_per_item = {item: max((s["item_counts"].get(item, 0) for s in summary_cur), default=1) or 1
+                    for item in TASK_ITEMS}
+    for s in summary_cur:
+        nm   = s["name"]
+        bars = ""
+        for item in TASK_ITEMS:
+            cnt  = s["item_counts"].get(item, 0)
+            g, y = THRESHOLDS[item]
+            pct  = int(cnt / max_per_item[item] * 100)
+            bar_color = "#10B981" if cnt >= g else ("#F59E0B" if cnt >= y else "#EF4444")
+            bars += (f'<div class="bar-row">'
+                     f'<div class="bar-label">{TASK_ICON[item]} {item}</div>'
+                     f'<div class="bar-track">'
+                     f'<div class="bar-fill" style="width:{pct}%;background:{bar_color};"></div>'
+                     f'</div>'
+                     f'<div class="bar-val">{cnt}</div></div>')
+        alt = s.get("alt_count", 0)
+        player_cards += (f'<div class="card">'
+                         f'<div class="card-name">{nm}</div>'
+                         f'{bars}'
+                         f'<div class="card-alt">🔥 替代任務 {alt} 次</div>'
+                         f'</div>')
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<title>新銳隊 院長訓練總覽 {year}年{month:02d}月</title>
+<style>
+@page {{ size: A4; margin: 15mm; }}
+* {{ box-sizing: border-box; }}
+body {{ font-family: 'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;
+        background: white; color: #111827; font-size: 12px; margin: 0; padding: 0; }}
+h1 {{ font-size: 20px; font-weight: 900; margin: 0 0 2px; }}
+.sub {{ color: #6B7280; font-size: 11px; margin-bottom: 14px; }}
+/* Matrix table */
+.pm-tbl {{ width: 100%; border-collapse: collapse; font-size: 11.5px; margin-bottom: 6px; }}
+.pm-tbl th {{ background: #1F2937; color: white; padding: 6px 7px;
+              text-align: center; font-size: 10.5px; white-space: nowrap; }}
+.pm-tbl th.name-col {{ text-align: left; padding-left: 10px; min-width: 70px; }}
+.pm-tbl td {{ border: 1px solid #E5E7EB; padding: 6px 7px; text-align: center; }}
+.pm-tbl td.name {{ padding: 6px 10px; font-weight: 800; white-space: nowrap;
+                   border-right: 2px solid #E5E7EB; text-align: left; }}
+.pm-tbl .tot td {{ background: #EFF6FF; font-weight: 900; color: #1E3A8A;
+                   border-top: 2px solid #93C5FD; }}
+.price {{ font-weight: 400; font-size: 9px; opacity: .7; }}
+.spotlight {{ margin-top: 7px; background: #FEF3C7; border-left: 3px solid #D97706;
+              padding: 6px 10px; border-radius: 0 5px 5px 0; font-size: 11px; color: #92400E; }}
+/* Legend */
+.legend {{ display: flex; gap: 14px; margin: 10px 0 14px; font-size: 10.5px; }}
+.legend span {{ display: flex; align-items: center; gap: 4px; }}
+.dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
+/* Player cards */
+.cards {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }}
+.card {{ border: 1px solid #E5E7EB; border-radius: 6px; padding: 8px 10px; }}
+.card-name {{ font-size: 13px; font-weight: 800; color: #1F2937;
+              margin-bottom: 6px; border-bottom: 1px solid #F3F4F6; padding-bottom: 4px; }}
+.bar-row {{ display: flex; align-items: center; gap: 5px; margin-bottom: 3px; }}
+.bar-label {{ width: 72px; font-size: 9.5px; white-space: nowrap; color: #374151; flex-shrink: 0; }}
+.bar-track {{ flex: 1; height: 8px; background: #F3F4F6; border-radius: 4px; overflow: hidden; }}
+.bar-fill {{ height: 100%; border-radius: 4px; transition: width .3s; }}
+.bar-val {{ width: 20px; text-align: right; font-size: 10px; font-weight: 700; color: #374151; flex-shrink: 0; }}
+.card-alt {{ font-size: 9.5px; color: #6B7280; margin-top: 5px; padding-top: 4px;
+             border-top: 1px dashed #E5E7EB; }}
+.section-title {{ font-size: 13px; font-weight: 800; color: #1F2937; margin: 14px 0 6px; }}
+.footer {{ margin-top: 14px; font-size: 9.5px; color: #9CA3AF; border-top: 1px solid #E5E7EB;
+           padding-top: 6px; }}
+</style>
+</head>
+<body>
+
+<h1>🏆 新銳隊 院長訓練總覽</h1>
+<div class="sub">{year}年{month:02d}月 &nbsp;·&nbsp; ▲▼ 與上月比較 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+
+<div class="section-title">📊 各選手任務完成矩陣</div>
+<table class="pm-tbl">
+<thead>
+  <tr>
+    <th class="name-col">選手</th>
+    {th}
+    <th>🔥 替代任務</th>
+  </tr>
+</thead>
+<tbody>
+{rows}
+<tr class="tot">
+  <td class="name">全隊合計</td>
+  {tot_cells}
+</tr>
+</tbody>
+</table>
+{spotlight}
+
+<div class="legend">
+  <span><span class="dot" style="background:#10B981;"></span>綠色 = 表現良好</span>
+  <span><span class="dot" style="background:#F59E0B;"></span>黃色 = 尚可，可加強</span>
+  <span><span class="dot" style="background:#EF4444;"></span>紅色 = 需要關注</span>
+  <span style="color:#6B7280;">·　數字後 ▲▼ 為與上月差值</span>
+</div>
+
+<div class="section-title">📈 個人訓練進度圖</div>
+<div class="cards">{player_cards}</div>
+
+<div class="footer">※ 新銳隊 教育訓練管理系統 &nbsp;·&nbsp; 產出日期：{today_str}</div>
+</body>
+</html>"""
+
 # ── 週報告 HTML 生成 ─────────────────────────────────────────────
 def generate_weekly_report_html(players_list: list, wd: list[date], all_data: list) -> str:
     trainee_set = set(TRAINEE_PLAYERS)
@@ -2200,6 +2384,18 @@ with st.container(border=True):
         unsafe_allow_html=True,
     )
     st.caption("🟢 綠色 = 表現良好　🟡 黃色 = 尚可，可加強　🔴 紅色 = 需要關注　·　小箭頭 ▲▼ 為與上月比較")
+
+    st.write("")
+    principal_html = generate_principal_report_html(summary_cur, summary_prev, yr_p, mo_p)
+    st.download_button(
+        label=f"⬇️ 下載 {yr_p}年{mo_p:02d}月 訓練總覽（傳院長）",
+        data=principal_html.encode("utf-8"),
+        file_name=f"新銳隊_院長訓練總覽_{yr_p:04d}{mo_p:02d}.html",
+        mime="text/html",
+        use_container_width=True,
+        key="dl_principal",
+    )
+    st.caption("下載後用瀏覽器開啟 → Ctrl+P（或 ⌘P）→ 另存為 PDF")
 
 
 # ═════════════════════════════════════════════════════════════════
