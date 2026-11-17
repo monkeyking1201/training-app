@@ -961,6 +961,198 @@ def render_principal_matrix_html(
 
 
 
+# ── 個人月報 HTML 生成 ────────────────────────────────────────────
+def generate_player_monthly_report_html(
+    player: str, year: int, month: int, all_data: list
+) -> str:
+    """Clean single-player A4 monthly training report."""
+    from datetime import date as _date
+    today_str = _date.today().strftime("%Y/%m/%d")
+
+    s = calc_monthly_bonus_one(player, year, month, all_data)
+    is_trainee = player in TRAINEE_PLAYERS
+
+    TASK_ITEMS = list(ITEM_COL_IDX.keys())
+    TASK_ICON  = {
+        "出席率":"📌","死活題":"🧩","次一手":"🎯",
+        "輸棋討論":"🗣️","AI人機大戰":"🤖","新銳循環賽":"⚔️",
+    }
+    THRESHOLDS = {
+        "出席率":(14,9),"死活題":(12,8),"次一手":(5,3),
+        "輸棋討論":(5,3),"AI人機大戰":(7,4),"新銳循環賽":(7,4),
+    }
+
+    task_rows = ""
+    for item in TASK_ITEMS:
+        cnt   = s["item_counts"].get(item, 0)
+        amt   = cnt * ITEM_PRICES[item]
+        g, y  = THRESHOLDS[item]
+        if cnt >= g:
+            status_col, status_txt, bar_col = "#059669", "良好 ✓", "#10B981"
+        elif cnt >= y:
+            status_col, status_txt, bar_col = "#D97706", "尚可", "#F59E0B"
+        elif cnt > 0:
+            status_col, status_txt, bar_col = "#DC2626", "加強", "#EF4444"
+        else:
+            status_col, status_txt, bar_col = "#9CA3AF", "未完成", "#E5E7EB"
+        pct  = int(cnt / g * 100) if g else 0
+        pct  = min(pct, 100)
+        task_rows += f"""
+<tr>
+  <td class="item-icon">{TASK_ICON[item]}</td>
+  <td class="item-name">{item}</td>
+  <td class="item-price">${ITEM_PRICES[item]:,}/次</td>
+  <td class="item-cnt">{cnt} 次</td>
+  <td class="item-bar">
+    <div class="bar-track">
+      <div class="bar-fill" style="width:{pct}%;background:{bar_col};"></div>
+    </div>
+  </td>
+  <td class="item-status" style="color:{status_col};">{status_txt}</td>
+  <td class="item-amt">{"+" if amt > 0 else ""}${amt:,}</td>
+</tr>"""
+
+    alt_cnt = s.get("alt_count", 0)
+    alt_amt = alt_cnt * 300
+    alt_row = f"""
+<tr class="alt-row">
+  <td class="item-icon">🔥</td>
+  <td class="item-name">替代任務</td>
+  <td class="item-price">$300/次</td>
+  <td class="item-cnt">{alt_cnt} 次</td>
+  <td class="item-bar"></td>
+  <td class="item-status" style="color:#6B7280;">{"已完成" if alt_cnt > 0 else "-"}</td>
+  <td class="item-amt">{"+" if alt_amt > 0 else ""}${alt_amt:,}</td>
+</tr>"""
+
+    total     = s["total"]
+    days      = s["days"]
+    target_txt = "（生力軍：訓練期，不計發放）" if is_trainee else f"${total:,}"
+    badge     = '<span class="trainee-badge">生力軍</span>' if is_trainee else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<title>{player} 訓練月報 {year}年{month:02d}月</title>
+<style>
+@page {{ size: A4; margin: 18mm 20mm; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: 'Noto Sans TC','PingFang TC','Microsoft JhengHei',sans-serif;
+        background: white; color: #111827; font-size: 12.5px; }}
+
+/* Header */
+.header {{ border-bottom: 3px solid #1F2937; padding-bottom: 10px; margin-bottom: 18px; }}
+.org  {{ font-size: 11px; color: #6B7280; letter-spacing: .5px; margin-bottom: 4px; }}
+.name {{ font-size: 28px; font-weight: 900; color: #1F2937; display: flex; align-items: center; gap: 10px; }}
+.month-badge {{ font-size: 13px; font-weight: 700; background: #1F2937; color: white;
+                padding: 4px 12px; border-radius: 20px; }}
+.trainee-badge {{ font-size: 11px; background: #E0F2FE; color: #0369A1;
+                  padding: 3px 10px; border-radius: 10px; font-weight: 600; }}
+
+/* KPI strip */
+.kpi-strip {{ display: flex; gap: 12px; margin-bottom: 20px; }}
+.kpi {{ flex: 1; border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px 14px; }}
+.kpi-label {{ font-size: 10px; color: #6B7280; margin-bottom: 3px; }}
+.kpi-value {{ font-size: 20px; font-weight: 900; color: #1F2937; }}
+.kpi-unit  {{ font-size: 11px; color: #6B7280; font-weight: 400; margin-left: 2px; }}
+
+/* Task table */
+table {{ width: 100%; border-collapse: collapse; margin-bottom: 6px; }}
+th {{ background: #1F2937; color: white; font-size: 10.5px; padding: 7px 10px;
+      text-align: left; white-space: nowrap; }}
+th.r {{ text-align: right; }}
+td {{ border-bottom: 1px solid #F3F4F6; padding: 9px 10px; vertical-align: middle; }}
+.item-icon  {{ width: 28px; font-size: 14px; text-align: center; }}
+.item-name  {{ font-weight: 700; font-size: 13px; }}
+.item-price {{ font-size: 10px; color: #9CA3AF; white-space: nowrap; }}
+.item-cnt   {{ text-align: center; font-weight: 700; font-size: 13px; width: 52px; }}
+.item-bar   {{ width: 100px; }}
+.bar-track  {{ height: 8px; background: #F3F4F6; border-radius: 4px; overflow: hidden; }}
+.bar-fill   {{ height: 100%; border-radius: 4px; }}
+.item-status{{ text-align: center; font-weight: 700; font-size: 11.5px; width: 60px; white-space: nowrap; }}
+.item-amt   {{ text-align: right; font-weight: 800; font-size: 13px; white-space: nowrap; color: #1E3A8A; }}
+.alt-row td {{ background: #FAFAF9; color: #6B7280; }}
+.alt-row .item-amt {{ color: #374151; }}
+
+/* Total row */
+.total-row td {{ background: #EFF6FF; border-top: 2px solid #93C5FD;
+                 font-weight: 900; color: #1E3A8A; padding: 10px; }}
+
+/* Legend */
+.legend {{ display: flex; gap: 14px; font-size: 10px; color: #6B7280;
+           margin: 8px 0 20px; flex-wrap: wrap; }}
+.dot {{ width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+        margin-right: 3px; vertical-align: middle; }}
+
+/* Footer */
+.footer {{ margin-top: 20px; border-top: 1px solid #E5E7EB; padding-top: 8px;
+           font-size: 9.5px; color: #9CA3AF; display: flex; justify-content: space-between; }}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="org">🏆 新銳隊 個人訓練月報</div>
+  <div class="name">
+    {player} {badge}
+    <span class="month-badge">{year}年{month:02d}月</span>
+  </div>
+</div>
+
+<div class="kpi-strip">
+  <div class="kpi">
+    <div class="kpi-label">出席天數</div>
+    <div class="kpi-value">{days}<span class="kpi-unit">天</span></div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">任務類型完成</div>
+    <div class="kpi-value">{sum(1 for v in s["item_counts"].values() if v > 0)}<span class="kpi-unit"> / {len(TASK_ITEMS)} 項</span></div>
+  </div>
+  <div class="kpi" style="border-color:#93C5FD;background:#EFF6FF;">
+    <div class="kpi-label">本月訓練獎金</div>
+    <div class="kpi-value" style="color:#1E3A8A;">{target_txt}</div>
+  </div>
+</div>
+
+<table>
+<thead>
+  <tr>
+    <th style="width:28px;"></th>
+    <th>訓練項目</th>
+    <th>單價</th>
+    <th style="text-align:center;">完成次數</th>
+    <th>達成進度</th>
+    <th style="text-align:center;">狀態</th>
+    <th class="r">小計</th>
+  </tr>
+</thead>
+<tbody>
+{task_rows}
+{alt_row}
+<tr class="total-row">
+  <td colspan="6">本月訓練獎金合計{" （生力軍不計入發放）" if is_trainee else ""}</td>
+  <td style="text-align:right;">${total:,}</td>
+</tr>
+</tbody>
+</table>
+
+<div class="legend">
+  <span><span class="dot" style="background:#10B981;"></span>良好：達標</span>
+  <span><span class="dot" style="background:#F59E0B;"></span>尚可：接近目標</span>
+  <span><span class="dot" style="background:#EF4444;"></span>加強：需努力</span>
+  <span>·　進度條以「良好門檻」為 100%</span>
+</div>
+
+<div class="footer">
+  <span>新銳隊 教育訓練管理系統</span>
+  <span>產出日期：{today_str}</span>
+</div>
+
+</body>
+</html>"""
+
+
 # ── 院長訓練總覽 獨立 HTML 報告 ──────────────────────────────────
 def generate_principal_report_html(
     summary_cur: list, summary_prev: list, year: int, month: int
@@ -2492,6 +2684,26 @@ with st.container(border=True):
             key="dl_monthly_weekly",
         )
         st.caption("每週一張表，整個月一次看完")
+
+    st.divider()
+
+    # ── 個人月報 ─────────────────────────────────────────────────
+    st.markdown("**🧑 個人訓練月報**")
+    all_pnames_r = [p for p in players if p not in TRAINEE_PLAYERS] +                    [p for p in players if p in TRAINEE_PLAYERS]
+    sel_player   = st.selectbox("選擇選手", all_pnames_r, key="player_report_sel",
+                                label_visibility="collapsed")
+    if sel_player:
+        player_html  = generate_player_monthly_report_html(sel_player, yr_r, mo_r, all_data)
+        fname_player = f"新銳隊_{sel_player}_{yr_r}{mo_r:02d}月報.html"
+        st.download_button(
+            label=f"⬇️ 下載 {sel_player} · {yr_r}年{mo_r:02d}月 個人月報",
+            data=player_html.encode("utf-8"),
+            file_name=fname_player,
+            mime="text/html",
+            use_container_width=True,
+            key="dl_player_report",
+        )
+        st.caption("下載後用瀏覽器開啟 → Ctrl+P（或 ⌘P）→ 另存為 PDF，可直接寄給選手或家長")
 
 
 # ── 手動刷新 ─────────────────────────────────────────────────────
